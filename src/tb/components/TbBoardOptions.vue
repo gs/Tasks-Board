@@ -101,6 +101,10 @@ in the header (TbClosedToggle, TbExpandToggle).
 			@update:model-value="setView({ timelineUndated: $event })">
 			{{ tbt('Show tasks without dates') }}
 		</NcActionCheckbox>
+		<NcActionCheckbox :model-value="view.timelineLinks !== false"
+			@update:model-value="setView({ timelineLinks: $event })">
+			{{ tbt('Show dependencies') }}
+		</NcActionCheckbox>
 		<template v-if="projects.length">
 			<NcActionSeparator />
 			<NcActionCaption :name="tbt('Projects')" />

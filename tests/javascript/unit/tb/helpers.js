@@ -18,7 +18,7 @@ export function makeCalendar(id, extra = {}) {
  * @return {Task} The task, added to the calendar
  */
 export function makeTask(calendar, props) {
-	const { uid, summary = props.uid, status, percent, start, due, tags, priority, completed, related, modified, created, attendee, followUp, alarms = [] } = props
+	const { uid, summary = props.uid, status, percent, start, due, tags, priority, completed, related, modified, created, attendee, followUp, alarms = [], lines: extra = [] } = props
 	const lines = [
 		'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Tasks Board//test//EN', 'BEGIN:VTODO',
 		'UID:' + uid, 'DTSTAMP:20261001T080000Z', 'CREATED:' + (created ? fmtDateTime(created) : '20261001T080000Z'), 'SUMMARY:' + summary,
@@ -33,6 +33,7 @@ export function makeTask(calendar, props) {
 	if (completed) lines.push('COMPLETED:' + fmtDateTime(completed))
 	if (related) lines.push('RELATED-TO;RELTYPE=PARENT:' + related)
 	if (attendee) lines.push(attendee)
+	lines.push(...extra)
 	for (const alarm of alarms) {
 		lines.push('BEGIN:VALARM', 'ACTION:DISPLAY', 'DESCRIPTION:Reminder', alarm, 'END:VALARM')
 	}

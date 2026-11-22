@@ -8,6 +8,7 @@ import client from '../../services/cdav.js'
 import Requests from '../../services/requests.js'
 import { Calendar } from '../../store/calendars.js'
 import { waitingTag, isWaitingTagName, hasWaitingTag, startsInFuture, parseViews, patchViews, viewFor } from '../board.js'
+import { linkIndex, linkProblem, pushPlan, writeLinks } from '../dependencies.js'
 import { hiddenListsAfter, isListHidden, setHiddenLists } from '../hidden.js'
 import { tbt } from '../l10n.js'
 import { shiftedDates } from '../timeline.js'
@@ -83,6 +84,56 @@ function endWaiting(commit, task, now = moment()) {
 		changed = true
 	}
 	return changed
+}
+
+/**
+ * Moves the dates of one task by whole days and saves it
+ *
+ * @param {object} context The store context
+ * @param {object} task The task
+ * @param {number} days Days to move (negative: earlier)
+ * @param {string} edge 'move' (start and due), 'start' or 'end'
+ * @return {Promise<boolean>} Whether the task changed
+ */
+async function applyShift(context, task, days, edge = 'move') {
+	const { start, due } = shiftedDates(task, days, edge)
+	if (!start && !due) {
+		return false
+	}
+	const allDay = task.allDay
+	// Later: due first, earlier: start first, so the two never cross on the way
+	if (days > 0 && due) {
+		context.commit('setDue', { task, due, allDay })
+	}
+	if (start) {
+		context.commit('setStart', { task, start, allDay })
+	}
+	if (days < 0 && due) {
+		context.commit('setDue', { task, due, allDay })
+	}
+	await context.dispatch('updateTask', task)
+	return true
+}
+
+/**
+ * Moves the successors that a move would put too early (see pushPlan)
+ *
+ * @param {object} context The store context
+ * @param {Array} moved The tasks that moved
+ * @return {Promise<number>} The number of tasks moved along
+ */
+async function pushSuccessors(context, moved) {
+	const plan = pushPlan(moved, {
+		successorsOf: task => context.getters.tbSuccessors(task),
+		canMove: task => !isTaskReadOnly(task) && !task.isRecurring,
+	})
+	let pushed = 0
+	for (const { task, days } of plan) {
+		if (await applyShift(context, task, days)) {
+			pushed++
+		}
+	}
+	return pushed
 }
 
 const EXPANDED_STORAGE_KEY = 'tasks_board.expandedCards'
@@ -233,6 +284,20 @@ const mutations = {
 	 * @param {object} data.task The task
 	 * @param {Date|moment|null} data.date The follow-up day (null: remove)
 	 */
+	/**
+	 * Sets the dependencies a task has as predecessor
+	 *
+	 * @param {object} state The module state
+	 * @param {object} data Destructuring object
+	 * @param {object} data.task The task
+	 * @param {Array} data.links [{ type, uid, gap }]
+	 */
+	tbSetLinks(state, { task, links }) {
+		writeLinks(task.vtodo, links)
+		task.updateLastModified()
+		task._tbLinks = links
+	},
+
 	tbSetFollowUp(state, { task, date }) {
 		writeFollowUpAlarm(task, date, tbt('Follow-up'))
 	},
@@ -261,6 +326,31 @@ async function saveSetting(type, value) {
 }
 
 const getters = {
+	/**
+	 * All dependencies between the loaded tasks (see dependencies.js)
+	 *
+	 * @param {object} state The module state
+	 * @param {object} getters The getters
+	 * @param {object} rootState The root state
+	 * @param {object} rootGetters The root getters
+	 * @return {object} { successors, predecessors }
+	 */
+	tbLinkIndex: (state, getters, rootState, rootGetters) => linkIndex(rootGetters.getSortedCalendars.flatMap(calendar => Object.values(calendar.tasks))),
+	tbPredecessors: (state, getters) => (task) => getters.tbLinkIndex.predecessors.get(task.key) || [],
+	tbSuccessors: (state, getters) => (task) => getters.tbLinkIndex.successors.get(task.key) || [],
+	/**
+	 * Why a dependency from a to b is not possible (see linkProblem), null if it is
+	 *
+	 * @param {object} state The module state
+	 * @param {object} getters The getters
+	 * @param {object} rootState The root state
+	 * @param {object} rootGetters The root getters
+	 * @return {Function} (a, b) => string|null
+	 */
+	tbLinkProblem: (state, getters, rootState, rootGetters) => (a, b) => linkProblem(a, b, {
+		parentOf: task => rootGetters.getParentTask(task),
+		successorsOf: task => getters.tbSuccessors(task),
+	}),
 	/**
 	 * Whether completed and cancelled tasks are shown (list, board and table).
 	 * Stored in the setting of the Tasks app that shows the completed tasks of a list.
@@ -471,9 +561,10 @@ const actions = {
 	 * @param {number} data.days Days to move (negative: earlier)
 	 * @param {string} data.edge 'move' (start and due), 'start' or 'end'
 	 * @param {boolean} data.withSubtasks Move the subtasks as well (only with 'move')
-	 * @return {Promise<number>} The number of tasks changed
+	 * @param {boolean} data.pushSuccessors Move dependent tasks along that would start or end too early
+	 * @return {Promise<object>} { changed, pushed }: tasks changed, dependent tasks moved along
 	 */
-	async tbShiftDates(context, { task, days, edge = 'move', withSubtasks = false }) {
+	async tbShiftDates(context, { task, days, edge = 'move', withSubtasks = false, pushSuccessors: push = false }) {
 		const tasks = [task]
 		if (withSubtasks && edge === 'move') {
 			const seen = new Set([task.key])
@@ -487,29 +578,75 @@ const actions = {
 			}
 		}
 		let changed = 0
+		const moved = []
 		for (const item of tasks) {
 			if (isTaskReadOnly(item) || item.isRecurring) {
 				continue
 			}
-			const { start, due } = shiftedDates(item, days, edge)
-			if (!start && !due) {
-				continue
+			if (await applyShift(context, item, days, edge)) {
+				moved.push(item)
+				changed++
 			}
-			const allDay = item.allDay
-			// Later: due first, earlier: start first, so the two never cross on the way
-			if (days > 0 && due) {
-				context.commit('setDue', { task: item, due, allDay })
-			}
-			if (start) {
-				context.commit('setStart', { task: item, start, allDay })
-			}
-			if (days < 0 && due) {
-				context.commit('setDue', { task: item, due, allDay })
-			}
-			await context.dispatch('updateTask', item)
-			changed++
 		}
-		return changed
+		const pushed = push && moved.length ? await pushSuccessors(context, moved) : 0
+		return { changed, pushed }
+	},
+
+	/**
+	 * Adds a dependency: b depends on a (stored in a)
+	 *
+	 * @param {object} context The store context
+	 * @param {object} data Destructuring object
+	 * @param {object} data.from The predecessor
+	 * @param {object} data.to The successor
+	 * @param {string} data.type The type (see LINK_TYPES)
+	 * @param {boolean} data.push Move dependent tasks along that now start or end too early (timeline)
+	 * @return {Promise<object>} { problem, pushed }: why it was not added (or null), tasks moved along
+	 */
+	async tbAddLink(context, { from, to, type, push = false }) {
+		const problem = isTaskReadOnly(from) ? 'readonly' : context.getters.tbLinkProblem(from, to)
+		if (problem) {
+			return { problem, pushed: 0 }
+		}
+		context.commit('tbSetLinks', { task: from, links: [...(from._tbLinks || []), { type, uid: to.uid, gap: null }] })
+		await context.dispatch('updateTask', from)
+		const pushed = push ? await pushSuccessors(context, [from]) : 0
+		return { problem: null, pushed }
+	},
+
+	/**
+	 * Changes the type of a dependency
+	 *
+	 * @param {object} context The store context
+	 * @param {object} data Destructuring object
+	 * @param {object} data.from The predecessor
+	 * @param {object} data.to The successor
+	 * @param {string} data.type The new type
+	 * @return {Promise}
+	 */
+	async tbSetLinkType(context, { from, to, type }) {
+		if (isTaskReadOnly(from)) {
+			return
+		}
+		context.commit('tbSetLinks', { task: from, links: (from._tbLinks || []).map(link => link.uid === to.uid ? { ...link, type } : link) })
+		await context.dispatch('updateTask', from)
+	},
+
+	/**
+	 * Removes a dependency
+	 *
+	 * @param {object} context The store context
+	 * @param {object} data Destructuring object
+	 * @param {object} data.from The predecessor
+	 * @param {object} data.to The successor
+	 * @return {Promise}
+	 */
+	async tbRemoveLink(context, { from, to }) {
+		if (isTaskReadOnly(from)) {
+			return
+		}
+		context.commit('tbSetLinks', { task: from, links: (from._tbLinks || []).filter(link => link.uid !== to.uid) })
+		await context.dispatch('updateTask', from)
 	},
 
 	/**

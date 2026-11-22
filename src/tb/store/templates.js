@@ -11,6 +11,7 @@ import SyncStatus from '../../models/syncStatus.js'
 import Task from '../../models/task.js'
 import { randomUUID } from '../../utils/crypto.js'
 import { assigneeOf } from '../assignee.js'
+import { remapLinks, writeLinks } from '../dependencies.js'
 import { tbt } from '../l10n.js'
 import { prepareTemplateCopy, resolveTemplateCalendar, setActiveTemplateId } from '../templates.js'
 import { currentUid, requestNotification } from './assignment.js'
@@ -29,6 +30,17 @@ const getters = {
 }
 
 /**
+ * The tasks a template copy contains (the task and its open subtasks)
+ *
+ * @param {object} task The task
+ * @return {Array}
+ */
+function treeOf(task) {
+	const subTasks = Object.values(task.subTasks || {}).filter(sub => sub.status !== 'CANCELLED' && !sub.deleted)
+	return [task, ...subTasks.flatMap(treeOf)]
+}
+
+/**
  * Copies a task and its open subtasks into a list
  *
  * @param {object} context The store context
@@ -37,11 +49,15 @@ const getters = {
  * @param {object} data.calendar The target list
  * @param {object|null} data.parent The new parent task
  * @param {string|null} data.summary New title (main task)
+ * @param {Map} data.uids Old UID → new UID of all tasks copied (dependencies follow them)
  * @param {Array} created Collects the created tasks
  */
-async function copyTree(context, { task, calendar, parent, summary }, created) {
+async function copyTree(context, { task, calendar, parent, summary, uids }, created) {
 	const copy = new Task(ICAL.stringify(task.jCal), calendar)
-	copy.uid = randomUUID()
+	copy.uid = uids.get(task.uid) || randomUUID()
+	const links = remapLinks(task._tbLinks || [], uids)
+	writeLinks(copy.vtodo, links)
+	copy._tbLinks = links
 	copy.created = ICAL.Time.fromJSDate(new Date(), true)
 	copy.dav = null
 	copy.conflict = false
@@ -58,7 +74,7 @@ async function copyTree(context, { task, calendar, parent, summary }, created) {
 	const subTasks = Object.values(task.subTasks || {})
 		.filter(sub => sub.status !== 'CANCELLED' && !sub.deleted)
 	for (const sub of subTasks) {
-		await copyTree(context, { task: sub, calendar, parent: copy, summary: null }, created)
+		await copyTree(context, { task: sub, calendar, parent: copy, summary: null, uids }, created)
 	}
 }
 
@@ -83,7 +99,8 @@ const actions = {
 		}
 		const created = []
 		try {
-			await copyTree(context, { task: template, calendar, parent: null, summary }, created)
+			const uids = new Map(treeOf(template).map(task => [task.uid, randomUUID()]))
+			await copyTree(context, { task: template, calendar, parent: null, summary, uids }, created)
 		} catch (error) {
 			console.error('Could not create the task from the template', error)
 			return { task: created[0] ? context.getters.getTaskByUid(created[0].uid) : null, count: created.length, error: 'save' }

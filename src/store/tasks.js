@@ -27,6 +27,7 @@ import { isParentInList, momentToICALTime, parseString } from './storeHelper.js'
 import { getDefaultRecurrenceRuleObject } from '../models/recurrenceRule.js'
 import SyncStatus from '../models/syncStatus.js'
 import Task from '../models/task.js'
+import { writeLinks } from '../tb/dependencies.js'
 import { tbBeforeCreateTask } from '../tb/progress.js'
 
 import { DateTimeValue, RecurValue } from '@nextcloud/calendar-js'
@@ -946,6 +947,9 @@ const actions = {
 
 		// Assign a new UID and created timestamp
 		newTask.uid = randomUUID()
+		// Tasks Board: dependencies stay with the original
+		writeLinks(newTask.vtodo, [])
+		newTask._tbLinks = []
 		newTask.created = ICAL.Time.fromJSDate(new Date(), true)
 		newTask.dav = null
 		newTask.conflict = false

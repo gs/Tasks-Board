@@ -60,6 +60,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 		</p>
 
 		<div v-if="hasMeta" class="tb-card__meta">
+			<TbDependencyBadge v-if="waitsForOthers" :task="task" class="tb-card__meta-item" />
 			<span v-if="followUp"
 				class="tb-card__meta-item"
 				:class="{ 'tb-card__meta-item--alert': followUp.alert }"
@@ -136,6 +137,7 @@ import { tbt } from '../l10n.js'
 import { countTaskItems, noteExcerpt } from '../markdown.js'
 import { isTaskReadOnly } from '../store/board.js'
 import TbAvatar from './TbAvatar.vue'
+import TbDependencyBadge from './TbDependencyBadge.vue'
 import { handleSelectClick } from '../store/selection.js'
 
 import moment from '@nextcloud/moment'
@@ -161,6 +163,7 @@ export default {
 		FormatListChecks,
 		NcProgressBar,
 		TbAvatar,
+		TbDependencyBadge,
 		SubdirectoryArrowRight,
 		TaskCheckbox,
 	},
@@ -282,8 +285,12 @@ export default {
 			// Closed subtasks only with the button for completed tasks in the header
 			return [...sorted.filter(task => !task.closed), ...(getters.tbShowClosed ? sorted.filter(task => task.closed) : [])]
 		},
+		/** Whether the chain icon shows (open predecessors or dates that do not fit) */
+		waitsForOthers() {
+			return !this.task.closed && this.$store.getters.tbPredecessors(this.task).length > 0
+		},
 		hasMeta() {
-			return !!(this.followUp || this.dueString || this.subtaskCount.total || this.showProgress || this.checklist.total)
+			return !!(this.followUp || this.dueString || this.subtaskCount.total || this.showProgress || this.checklist.total || this.waitsForOthers)
 		},
 	},
 	watch: {

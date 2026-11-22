@@ -19,7 +19,7 @@ const OWNER_SELECTOR = 'input, textarea, select, [contenteditable=""], [contente
  * @param {KeyboardEvent} event The event
  * @param {object} context Destructuring object
  * @param {boolean} context.onTask Whether a task row/card has the focus
- * @return {string|null} newTask, next, previous, open, toggle, select, board, help or null
+ * @return {string|null} newTask, next, previous, open, toggle, select, rename, board, help or null
  */
 export function shortcutAction(event, { onTask = false } = {}) {
 	if (event.ctrlKey || event.metaKey || event.altKey) {
@@ -44,6 +44,8 @@ export function shortcutAction(event, { onTask = false } = {}) {
 	case 'x':
 	case 'X':
 		return onTask ? 'select' : null
+	case 'F2':
+		return 'rename'
 	case 'b':
 	case 'B':
 		return event.shiftKey ? null : 'board'
@@ -111,6 +113,7 @@ export const SHORTCUTS = [
 	{ keys: ['Enter'], label: 'Open the task' },
 	{ keys: ['Space'], label: 'Complete / reopen the task' },
 	{ keys: ['X'], label: 'Select the task' },
+	{ keys: ['F2'], label: 'Rename the task' },
 	{ keys: ['Esc'], label: 'Clear the selection' },
 	{ keys: ['B'], label: 'Switch between list, board, table and timeline' },
 	{ keys: ['?'], label: 'Show the keyboard shortcuts' },

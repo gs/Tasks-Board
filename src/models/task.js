@@ -28,6 +28,7 @@ import moment from '@nextcloud/moment'
 
 import ICAL from 'ical.js'
 import { matchesAssigneeFilter, readAssignee } from '../tb/assignee.js'
+import { readLinks } from '../tb/dependencies.js'
 import { RecurValue } from '@nextcloud/calendar-js'
 import { randomUUID } from '../utils/crypto.js'
 import {
@@ -128,6 +129,8 @@ export default class Task {
 		this._customUrl = this.vtodo.getFirstPropertyValue('url') || ''
 		// Tasks Board: assigned person (ATTENDEE with X-NC-USERID)
 		this._tbAssignee = readAssignee(this.vtodo)
+		// Tasks Board: dependencies this task has as predecessor (RFC 9253)
+		this._tbLinks = readLinks(this.vtodo)
 
 		// Check for RECURRENCE-ID property (this is an exception instance)
 		this._recurrenceId = this.vtodo.getFirstPropertyValue('recurrence-id')

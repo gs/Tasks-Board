@@ -46,6 +46,22 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 		</NcButton>
 
 		<h3 class="tb-settings__headline tb-settings__headline--spaced">
+			{{ tbt('Lists in the navigation') }}
+		</h3>
+		<NcCheckboxRadioSwitch v-for="calendar in calendars"
+			:key="calendar.id"
+			type="switch"
+			class="tb-settings__list"
+			:model-value="!hiddenLists.includes(calendar.id)"
+			@update:model-value="setListShown(calendar, $event)">
+			<span class="tb-settings__list-dot" :style="{ backgroundColor: calendar.color }" />
+			{{ calendar.displayName }}
+		</NcCheckboxRadioSwitch>
+		<p class="tb-settings__hint">
+			{{ tbt('Hidden lists are folded at the bottom of the navigation. Their tasks are left out of the collections, the overview and the dashboard widget; the list itself still shows them.') }}
+		</p>
+
+		<h3 class="tb-settings__headline tb-settings__headline--spaced">
 			{{ tbt('Notifications') }}
 		</h3>
 		<NcCheckboxRadioSwitch type="switch"
@@ -209,6 +225,9 @@ export default {
 		prefs() {
 			return this.$store.getters.tbPrefs
 		},
+		hiddenLists() {
+			return Array.isArray(this.prefs.hiddenLists) ? this.prefs.hiddenLists : []
+		},
 		calendars() {
 			return this.$store.getters.getSortedCalendars.filter(calendar => calendar.supportsTasks !== false)
 		},
@@ -242,6 +261,14 @@ export default {
 		tbt,
 		set(patch) {
 			this.$store.dispatch('setTbPrefs', patch)
+		},
+		async setListShown(calendar, shown) {
+			try {
+				await this.$store.dispatch('setTbListHidden', { calendar, hide: !shown })
+			} catch (error) {
+				console.error(error)
+				showError(tbt('Could not save the setting.'))
+			}
 		},
 		showShortcuts() {
 			emit('tasks_board:show-shortcuts')
@@ -296,6 +323,14 @@ export default {
 		&--spaced {
 			margin-top: calc(3 * var(--default-grid-baseline));
 		}
+	}
+
+	&__list-dot {
+		display: inline-block;
+		width: 10px;
+		height: 10px;
+		margin-inline-end: 6px;
+		border-radius: 50%;
 	}
 
 	&__hint {

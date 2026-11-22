@@ -54,9 +54,19 @@ License along with this library. If not, see <http://www.gnu.org/licenses/>.
 				@toggle-completed="toggleCompleted(task)" />
 			<!-- Info: summary, progress & tags -->
 			<div class="task-body__info"
-				@dblclick="editSummary()">
+				@dblclick="tbStartRename(null)">
 				<div class="summary">
-					<span v-linkify="{text: task.summary, linkify: true}" />
+					<!-- Tasks Board: a click on the name changes it right here -->
+					<TbTitleField v-if="tbRenaming"
+						:value="task.summary"
+						:selection="tbRenaming.selection"
+						@save="tbRename"
+						@cancel="tbRenaming = null" />
+					<span v-else
+						ref="tbSummary"
+						v-linkify="{text: task.summary, linkify: true}"
+						:class="{ 'tb-summary--editable': !readOnly }"
+						@click="tbClickName($event)" />
 				</div>
 				<div v-if="task.tags.length > 0" class="tags-list">
 					<span v-for="(tag, index) in task.tags"
@@ -97,6 +107,7 @@ License along with this library. If not, see <http://www.gnu.org/licenses/>.
 					{{ tbSubtaskCount.done }}/{{ tbSubtaskCount.total }}
 				</span>
 				<TbFollowUpBadge :task="task" class="no-nav" />
+				<TbDependencyBadge :task="task" />
 				<TbAvatar :person="task._tbAssignee" class="tb-row-avatar" />
 				<div v-if="task.due || task.completed" :class="{'date--overdue': overdue(task.dueMoment) && !task.completed}" class="date">
 					<span class="date__short" :class="{ 'date__short--completed': task.completed }">{{ dueDateShort }}</span>
@@ -134,6 +145,16 @@ License along with this library. If not, see <http://www.gnu.org/licenses/>.
 							<Eye :size="20" />
 						</template>
 						{{ task.hideCompletedSubtasks ? t('tasks', 'Show closed subtasks') : t('tasks', 'Hide closed subtasks') }}
+					</NcActionButton>
+					<!-- Tasks Board: change the name in the row -->
+					<NcActionButton v-if="!readOnly"
+						:close-after-click="true"
+						class="reactive no-nav tb-rename"
+						@click="tbRenameSoon">
+						<template #icon>
+							<PencilOutline :size="20" />
+						</template>
+						{{ tbt('Rename') }}
 					</NcActionButton>
 					<NcActionButton v-if="!readOnly"
 						:close-after-click="true"
@@ -218,9 +239,12 @@ import TaskCheckbox from './TaskCheckbox.vue'
 import TaskStatusDisplay from './TaskStatusDisplay.vue'
 import TaskDragContainer from './TaskDragContainer.vue'
 import TbAvatar from '../tb/components/TbAvatar.vue'
+import TbDependencyBadge from '../tb/components/TbDependencyBadge.vue'
 import TbFollowUpBadge from '../tb/components/TbFollowUpBadge.vue'
 import TbSubtaskToggle from '../tb/components/TbSubtaskToggle.vue'
+import TbTitleField from '../tb/components/TbTitleField.vue'
 import { tbt } from '../tb/l10n.js'
+import { offsetAtPoint } from '../tb/title.js'
 import { isWaitingTagName } from '../tb/waiting.js'
 import FileTreeOutline from 'vue-material-design-icons/FileTreeOutline.vue'
 import { handleSelectClick } from '../tb/store/selection.js'
@@ -228,7 +252,8 @@ import Task from '../models/task.js'
 import openNewTask from '../mixins/openNewTask.js'
 import { startDateString } from '../utils/dateStrings.js'
 
-import { emit } from '@nextcloud/event-bus'
+import { showError } from '@nextcloud/dialogs'
+import { emit, subscribe, unsubscribe } from '@nextcloud/event-bus'
 import { translate as t, translatePlural as n } from '@nextcloud/l10n'
 import moment from '@nextcloud/moment'
 import NcActions from '@nextcloud/vue/components/NcActions'
@@ -241,6 +266,7 @@ import Bell from 'vue-material-design-icons/BellOutline.vue'
 import ContentDuplicate from 'vue-material-design-icons/ContentDuplicate.vue'
 import Delete from 'vue-material-design-icons/TrashCanOutline.vue'
 import Eye from 'vue-material-design-icons/EyeOutline.vue'
+import PencilOutline from 'vue-material-design-icons/PencilOutline.vue'
 import Pin from 'vue-material-design-icons/PinOutline.vue'
 import Plus from 'vue-material-design-icons/Plus.vue'
 import TextBoxOutline from 'vue-material-design-icons/TextBoxOutline.vue'
@@ -265,8 +291,10 @@ export default {
 	components: {
 		CreateMultipleTasksDialog,
 		TbAvatar,
+		TbDependencyBadge,
 		TbFollowUpBadge,
 		TbSubtaskToggle,
+		TbTitleField,
 		FileTreeOutline,
 		TaskCheckbox,
 		TaskStatusDisplay,
@@ -279,6 +307,7 @@ export default {
 		ContentDuplicate,
 		Delete,
 		Eye,
+		PencilOutline,
 		Pin,
 		Plus,
 		TextBoxOutline,
@@ -309,6 +338,8 @@ export default {
 			additionalTaskProperties: {},
 			// Tasks Board: closed again with the arrow while the task is open (see showSubtasks)
 			tbKeepClosed: false,
+			// Tasks Board: the name is being changed in the row ({ selection })
+			tbRenaming: null,
 		}
 	},
 	computed: {
@@ -549,6 +580,14 @@ export default {
 		}
 	},
 
+	// Tasks Board: F2 changes the name of this task in the row
+	mounted() {
+		subscribe('tb:rename-task', this.tbOnRenameRequest)
+	},
+	beforeUnmount() {
+		unsubscribe('tb:rename-task', this.tbOnRenameRequest)
+	},
+
 	methods: {
 		t,
 		n,
@@ -709,6 +748,56 @@ export default {
 		editSummary() {
 			// emit an event to edit the task summary
 			emit('tasks:edit-appsidebar-summary', true)
+		},
+
+		/**
+		 * Tasks Board: a click on the name changes it right here, the caret where it was clicked.
+		 * Selecting (Ctrl/Cmd/Shift, selection mode), links and read-only tasks work as before.
+		 *
+		 * @param {MouseEvent} event The click
+		 */
+		tbClickName(event) {
+			if (this.readOnly || event.target.closest('a') || event.ctrlKey || event.metaKey || event.shiftKey || this.$store.state.tbSelection.mode) {
+				return
+			}
+			event.stopPropagation()
+			const offset = offsetAtPoint(this.$refs.tbSummary, event.clientX, event.clientY)
+			this.tbStartRename(offset === null ? null : [offset, offset])
+		},
+		/**
+		 * Tasks Board: starts changing the name in the row
+		 *
+		 * @param {Array|null} selection [start, end] in the name, null: caret at the end
+		 */
+		tbStartRename(selection) {
+			if (!this.readOnly) {
+				this.tbRenaming = { selection }
+			}
+		},
+		/** Tasks Board: from the menu, after it closed (it takes the focus back) */
+		tbRenameSoon() {
+			setTimeout(() => this.tbStartRename([0, this.task.summary.length]), 150)
+		},
+		/**
+		 * Tasks Board: F2 (see TbShortcuts)
+		 *
+		 * @param {object} request { key, handled }
+		 */
+		tbOnRenameRequest(request) {
+			if (request.handled || request.key !== this.task.key || this.readOnly) {
+				return
+			}
+			request.handled = true
+			this.tbStartRename([0, this.task.summary.length])
+		},
+		async tbRename(summary) {
+			this.tbRenaming = null
+			try {
+				await this.$store.dispatch('setSummary', { task: this.task, summary })
+			} catch (error) {
+				console.error(error)
+				showError(tbt('Could not change the task.'))
+			}
 		},
 
 		/** Tasks Board: arrow in front of the row */

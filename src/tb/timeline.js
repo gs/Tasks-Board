@@ -235,7 +235,7 @@ export const TIMELINE_COLUMNS = Object.freeze([
 	{ key: 'start', label: 'Start', width: 64 },
 	{ key: 'due', label: 'Due', width: 64 },
 	{ key: 'status', label: 'Status', width: 96 },
-	{ key: 'progress', label: 'Progress', width: 48 },
+	{ key: 'progress', label: 'Progress', width: 72 },
 	{ key: 'assignee', label: 'Person', width: 48 },
 ])
 
@@ -313,4 +313,25 @@ export function groupTimelineTasks(tasks, by, assignee) {
 		return result.sort((a, b) => (a.label === null) - (b.label === null) || (a.label || '').localeCompare(b.label || ''))
 	}
 	return result.sort((a, b) => (a.calendar.order ?? 0) - (b.calendar.order ?? 0) || a.label.localeCompare(b.label))
+}
+
+/**
+ * Path of a dependency arrow with right angles: it leaves the predecessor at
+ * one end and enters the successor at one end, going around when the
+ * successor lies before that end
+ *
+ * @param {object} from { x, y, out }: start point, out +1 (leaves to the right, from an end) or -1 (to the left, from a start)
+ * @param {object} to { x, y, entry }: end point, entry +1 (arrives moving right, at a start) or -1 (moving left, at an end)
+ * @param {number} gap Length of the first and last piece
+ * @param {number} rowHeight Height of a row (the way around goes along the row border)
+ * @return {string} SVG path
+ */
+export function linkPath(from, to, gap = 10, rowHeight = 36) {
+	const x1 = from.x + from.out * gap
+	if (Math.sign(to.x - x1) === to.entry) {
+		return `M ${from.x} ${from.y} H ${x1} V ${to.y} H ${to.x}`
+	}
+	const middle = from.y + Math.sign(to.y - from.y) * rowHeight / 2
+	const x3 = to.x - to.entry * gap
+	return `M ${from.x} ${from.y} H ${x1} V ${middle} H ${x3} V ${to.y} H ${to.x}`
 }

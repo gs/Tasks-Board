@@ -38,7 +38,7 @@ import { tbt } from '../l10n.js'
 import { moveIndex, nextViewMode, shortcutAction, shortcutsBlocked, SHORTCUTS, TASK_SELECTOR } from '../shortcuts.js'
 import { isTaskReadOnly } from '../store/board.js'
 
-import { subscribe, unsubscribe } from '@nextcloud/event-bus'
+import { emit, subscribe, unsubscribe } from '@nextcloud/event-bus'
 import NcDialog from '@nextcloud/vue/components/NcDialog'
 
 export default {
@@ -165,6 +165,20 @@ export default {
 				event.preventDefault()
 				this.$store.commit('toggleTbSelected', item.dataset.taskKey)
 				break
+			case 'rename': {
+				// The focused row, otherwise the open task: in its row if shown, else in the sidebar
+				const key = item?.dataset.taskKey || this.$store.getters.getTaskByUri(this.$route.params.taskId)?.key
+				if (!key) {
+					break
+				}
+				event.preventDefault()
+				const request = { key, handled: false }
+				emit('tb:rename-task', request)
+				if (!request.handled && this.$route.params.taskId) {
+					emit('tasks:edit-appsidebar-summary', true)
+				}
+				break
+			}
 			case 'board': {
 				const key = viewKeyForRoute(this.$route)
 				if (key) {

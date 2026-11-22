@@ -74,7 +74,19 @@ person and due date can be changed directly in the cell.
 									:priority-class="priorityClass(task)"
 									@click.stop
 									@toggle-completed="toggleCompleted(task)" />
-								<span class="tb-table__title" :title="task.summary">{{ task.summary }}</span>
+								<!-- A click on the name changes it right here -->
+								<TbTitleField v-if="renaming && renaming.key === task.key"
+									class="tb-table__title-field"
+									:value="task.summary"
+									:selection="renaming.selection"
+									@save="rename(task, $event)"
+									@cancel="renaming = null" />
+								<span v-else
+									class="tb-table__title"
+									:class="{ 'tb-table__title--editable': !isReadOnly(task) }"
+									:title="task.summary"
+									@click="clickTitle(task, $event)">{{ task.summary }}</span>
+								<TbDependencyBadge :task="task" />
 							</div>
 							<!-- Person -->
 							<button v-else-if="column.key === 'assignee'"
@@ -216,13 +228,17 @@ import { assigneeOf } from '../assignee.js'
 import { isTaskReadOnly } from '../store/board.js'
 import { handleSelectClick } from '../store/selection.js'
 import { STATUS } from '../status.js'
+import { offsetAtPoint } from '../title.js'
 import { moveColumn, normalizeColumns, shownColumns, storableColumns, treeRows } from '../table.js'
 import { followUpDate, followUpState, isFollowUpDue } from '../waiting.js'
 import TbAvatar from './TbAvatar.vue'
+import TbDependencyBadge from './TbDependencyBadge.vue'
 import TbTableMenu from './TbTableMenu.vue'
+import TbTitleField from './TbTitleField.vue'
 import TbWaitDialog from './TbWaitDialog.vue'
 
 import { showError } from '@nextcloud/dialogs'
+import { subscribe, unsubscribe } from '@nextcloud/event-bus'
 import moment from '@nextcloud/moment'
 
 import AccountOffOutline from 'vue-material-design-icons/AccountOffOutline.vue'
@@ -263,6 +279,8 @@ export default {
 		TbTableMenu,
 		TbWaitDialog,
 		TaskCheckbox,
+		TbDependencyBadge,
+		TbTitleField,
 		TimerSandEmpty,
 	},
 	props: {
@@ -283,6 +301,8 @@ export default {
 		return {
 			menu: null,
 			pendingWait: null,
+			// The name being changed in its row ({ key, selection })
+			renaming: null,
 			maxHeight: 'none',
 			now: moment(),
 			// Rows closed again with the arrow while they are open for now (task.key => true)
@@ -416,8 +436,10 @@ export default {
 		this.updateHeight()
 		window.addEventListener('resize', this.updateHeight)
 		this.timer = setInterval(() => { this.now = moment() }, 60000)
+		subscribe('tb:rename-task', this.onRenameRequest)
 	},
 	beforeUnmount() {
+		unsubscribe('tb:rename-task', this.onRenameRequest)
 		window.removeEventListener('resize', this.updateHeight)
 		clearInterval(this.timer)
 		this.sortable?.destroy()
@@ -559,6 +581,43 @@ export default {
 					this.$store.dispatch('setTbPrefs', { tableColumns: storableColumns(moved) })
 				},
 			})
+		},
+		/**
+		 * A click on the name changes it right here, the caret where it was clicked.
+		 * Selecting (Ctrl/Cmd/Shift, selection mode) and read-only tasks work as before.
+		 *
+		 * @param {object} task The task
+		 * @param {MouseEvent} event The click
+		 */
+		clickTitle(task, event) {
+			if (isTaskReadOnly(task) || event.ctrlKey || event.metaKey || event.shiftKey || this.$store.state.tbSelection.mode) {
+				return
+			}
+			event.stopPropagation()
+			const offset = offsetAtPoint(event.currentTarget, event.clientX, event.clientY)
+			this.renaming = { key: task.key, selection: offset === null ? null : [offset, offset] }
+		},
+		/**
+		 * F2 (see TbShortcuts): the row of the task, if it is shown here
+		 *
+		 * @param {object} request { key, handled }
+		 */
+		onRenameRequest(request) {
+			const task = request.handled ? null : this.rows.find(row => row.task.key === request.key)?.task
+			if (!task || isTaskReadOnly(task)) {
+				return
+			}
+			request.handled = true
+			this.renaming = { key: task.key, selection: [0, task.summary.length] }
+		},
+		async rename(task, summary) {
+			this.renaming = null
+			try {
+				await this.$store.dispatch('setSummary', { task, summary })
+			} catch (error) {
+				console.error(error)
+				showError(tbt('Could not change the task.'))
+			}
 		},
 		onRowClick(task, $event) {
 			if (handleSelectClick(this.$store, task, $event)) {
@@ -872,6 +931,16 @@ export default {
 		min-width: 0;
 		overflow: hidden;
 		text-overflow: ellipsis;
+		font-weight: 500;
+
+		&--editable {
+			cursor: text;
+		}
+	}
+
+	&__title-field {
+		flex: 1 1 auto;
+		min-width: 120px;
 		font-weight: 500;
 	}
 

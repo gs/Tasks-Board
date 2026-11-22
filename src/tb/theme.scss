@@ -657,6 +657,15 @@ $breakpoint-mobile: 1024px;
 			font-weight: 600;
 		}
 
+		// Our own title (TbSidebarTitle) takes the place of the one-line title
+		.app-sidebar-header__mainname-container:has(.tb-sidebar-title) {
+			align-items: flex-start;
+
+			> .app-sidebar-header__mainname {
+				display: none !important;
+			}
+		}
+
 		.app-sidebar-header__subname {
 			font-size: 12px;
 		}
@@ -906,4 +915,16 @@ body[data-tb-list-style='rows'] .app-tasks_board .app-content .task-list .groupe
 .app-tasks_board .app-content .task-item__body:focus-visible {
 	outline: 2px solid var(--color-primary-element);
 	outline-offset: -2px;
+}
+
+// A click on the name of a task changes it in the row (TaskBody, TbTitleField)
+.app-tasks_board .app-content .task-body__info .summary {
+	.tb-summary--editable {
+		cursor: text;
+	}
+
+	.tb-title-field {
+		flex: 1 1 auto;
+		min-width: 0;
+	}
 }

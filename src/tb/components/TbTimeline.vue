@@ -8,7 +8,9 @@ Timeline view: main tasks (projects) and their subtasks as bars from the start
 to the due date. Left the tree of tasks with optional columns, right the days.
 Drag a bar to move it (a main task takes its subtasks along), drag its ends to
 change start or due, draw a span on the row of a task without dates, drag the
-bell to move the follow-up. Rows can be grouped by list or person.
+bell to move the follow-up, drag from the dot at an end of a bar to another bar
+to make a dependency (arrows; click one to change or remove it). Moving a bar
+moves dependent tasks along. Rows can be grouped by list or person.
 On phones the timeline is only shown, not changed.
 -->
 <template>
@@ -22,7 +24,7 @@ On phones the timeline is only shown, not changed.
 		<div v-else
 			ref="scroller"
 			class="tb-timeline"
-			:class="{ 'tb-timeline--dragging': !!(drag || draw || bell) }"
+			:class="{ 'tb-timeline--dragging': !!(drag || draw || bell), 'tb-timeline--linking': !!link }"
 			:style="{ maxHeight, '--tb-day': dayWidth + 'px', '--tb-left': leftWidth + 'px' }">
 			<div class="tb-timeline__grid" :style="{ width: (leftWidth + timelineWidth) + 'px' }">
 				<!-- Head: label and today button, months, days or weeks -->
@@ -69,13 +71,68 @@ On phones the timeline is only shown, not changed.
 				</div>
 
 				<!-- Body: weekends and today line behind the rows -->
-				<div class="tb-timeline__body">
+				<div ref="body" class="tb-timeline__body">
 					<div class="tb-timeline__backdrop" :style="{ left: leftWidth + 'px', width: timelineWidth + 'px' }" aria-hidden="true">
 						<span v-for="tick in weekendTicks"
 							:key="tick.key"
 							class="tb-timeline__weekend"
 							:style="{ left: tick.left + 'px', width: tick.width + 'px' }" />
 						<span class="tb-timeline__now" :style="{ left: todayLeft + 'px' }" />
+					</div>
+
+					<!-- Dependencies: arrows between the bars, the one being drawn -->
+					<svg v-if="links.length || link"
+						class="tb-timeline__links"
+						:style="{ left: leftWidth + 'px' }"
+						:width="timelineWidth"
+						:height="rows.length * rowHeight">
+						<defs>
+							<marker id="tb-link-arrow"
+								viewBox="0 0 8 8"
+								refX="7"
+								refY="4"
+								markerWidth="7"
+								markerHeight="7"
+								markerUnits="userSpaceOnUse"
+								orient="auto">
+								<path d="M 0 0 L 8 4 L 0 8 z" class="tb-timeline__link-head" />
+							</marker>
+							<marker id="tb-link-arrow-conflict"
+								viewBox="0 0 8 8"
+								refX="7"
+								refY="4"
+								markerWidth="7"
+								markerHeight="7"
+								markerUnits="userSpaceOnUse"
+								orient="auto">
+								<path d="M 0 0 L 8 4 L 0 8 z" class="tb-timeline__link-head tb-timeline__link-head--conflict" />
+							</marker>
+						</defs>
+						<g v-for="item in links"
+							:key="item.key"
+							class="tb-timeline__link"
+							:class="{ 'tb-timeline__link--conflict': item.conflict, 'tb-timeline__link--active': linkMenu && linkMenu.key === item.key }"
+							:data-link="item.key"
+							@click="openLinkMenu(item, $event)">
+							<title>{{ item.title }}</title>
+							<path :d="item.path" class="tb-timeline__link-hit" />
+							<path :d="item.path"
+								class="tb-timeline__link-line"
+								:marker-end="item.conflict ? 'url(#tb-link-arrow-conflict)' : 'url(#tb-link-arrow)'" />
+						</g>
+						<line v-if="link"
+							class="tb-timeline__link-draft"
+							:class="{ 'tb-timeline__link-draft--denied': link.target && link.problem }"
+							:x1="link.x0"
+							:y1="link.y0"
+							:x2="link.x"
+							:y2="link.y" />
+					</svg>
+					<div v-if="link && link.target"
+						class="tb-timeline__link-hint"
+						:class="{ 'tb-timeline__link-hint--denied': !!link.problem }"
+						:style="{ left: (leftWidth + link.x + 14) + 'px', top: (link.y + 10) + 'px' }">
+						{{ link.problem ? linkProblemText(link.problem) : linkTypeLabel(link.type) }}
 					</div>
 
 					<template v-for="row in rows" :key="row.key">
@@ -167,6 +224,8 @@ On phones the timeline is only shown, not changed.
 										'tb-timeline__bar--waiting': row.waiting,
 										'tb-timeline__bar--editable': row.editable,
 										'tb-timeline__bar--dragged': drag && drag.keys.has(row.task.key),
+										'tb-timeline__bar--link-target': link && link.target === row.task.key && !link.problem,
+										'tb-timeline__bar--link-denied': link && link.target === row.task.key && !!link.problem,
 									}"
 									:style="barStyle(row)"
 									:title="barTitle(row)"
@@ -182,6 +241,17 @@ On phones the timeline is only shown, not changed.
 									</template>
 									<AlertCircleOutline v-if="row.outside" :size="14" class="tb-timeline__warn" />
 								</div>
+								<!-- Dots at both ends: drag one to another bar to make a dependency -->
+								<template v-if="row.linkable">
+									<span class="tb-timeline__link-dot tb-timeline__link-dot--start"
+										:style="{ left: (anchorX(row, 'start') - 13) + 'px' }"
+										:title="tbt('Drag from the dot at the end of a bar to another bar to link them')"
+										@pointerdown.stop="startLink(row, 'start', $event)" />
+									<span class="tb-timeline__link-dot tb-timeline__link-dot--end"
+										:style="{ left: (anchorX(row, 'end') + 3) + 'px' }"
+										:title="tbt('Drag from the dot at the end of a bar to another bar to link them')"
+										@pointerdown.stop="startLink(row, 'end', $event)" />
+								</template>
 								<!-- Follow-up: a reminder on its own day, independent of the bar -->
 								<span v-if="row.followUp && followUpLeft(row) !== null"
 									class="tb-timeline__followup"
@@ -197,6 +267,44 @@ On phones the timeline is only shown, not changed.
 					</template>
 				</div>
 			</div>
+		</div>
+		<!-- A dependency: its kind, or remove it -->
+		<div v-if="linkMenu"
+			ref="linkMenu"
+			class="tb-timeline__link-menu"
+			role="dialog"
+			:aria-label="tbt('Dependency')"
+			:style="{ left: linkMenu.x + 'px', top: linkMenu.y + 'px' }"
+			@keydown.esc.stop="closeLinkMenu">
+			<div class="tb-timeline__link-menu-title">
+				{{ linkMenu.from.summary }} → {{ linkMenu.to.summary }}
+			</div>
+			<label v-for="type in linkTypes"
+				:key="type.value"
+				class="tb-timeline__link-menu-type">
+				<input type="radio"
+					name="tb-link-type"
+					:value="type.value"
+					:checked="type.value === linkMenu.type"
+					:disabled="!linkMenu.editable"
+					@change="setLinkType(type.value)">
+				<span>
+					<span class="tb-timeline__link-menu-name">{{ type.label }}</span>
+					<span class="tb-timeline__link-menu-sentence">{{ successorSentenceFor(type.value) }}</span>
+				</span>
+			</label>
+			<p v-if="linkMenu.conflict" class="tb-timeline__link-menu-conflict">
+				{{ tbt('The dates do not fit') }}
+			</p>
+			<NcButton v-if="linkMenu.editable"
+				variant="tertiary"
+				size="small"
+				@click="removeLink">
+				<template #icon>
+					<Delete :size="18" />
+				</template>
+				{{ tbt('Remove the dependency') }}
+			</NcButton>
 		</div>
 		<!-- Legend: what the colours mean -->
 		<div v-if="rows.length && legend.length" class="tb-timeline__legend">
@@ -219,6 +327,15 @@ On phones the timeline is only shown, not changed.
 			<span v-if="rows.some(row => row.followUp)" class="tb-timeline__legend-entry tb-timeline__legend-entry--hint">
 				<span class="tb-timeline__followup tb-timeline__followup--legend"><BellOutline :size="14" /></span> {{ tbt('Follow-up') }}
 			</span>
+			<span v-if="links.length" class="tb-timeline__legend-entry tb-timeline__legend-entry--hint">
+				<span class="tb-timeline__legend-link" /> {{ tbt('Dependency') }}
+			</span>
+			<span v-if="links.some(item => item.conflict)" class="tb-timeline__legend-entry tb-timeline__legend-entry--hint">
+				<span class="tb-timeline__legend-link tb-timeline__legend-link--conflict" /> {{ tbt('The dates do not fit') }}
+			</span>
+			<span v-if="showLinks && !touch && taskRows.some(row => row.linkable)" class="tb-timeline__legend-entry tb-timeline__legend-entry--hint">
+				<span class="tb-timeline__legend-dot" /> {{ tbt('Drag from the dot at the end of a bar to another bar to link them') }}
+			</span>
 		</div>
 	</div>
 </template>
@@ -227,17 +344,18 @@ On phones the timeline is only shown, not changed.
 import { assigneeOf } from '../assignee.js'
 import { boardColumn, collectBoardTasks, isFiltering } from '../board.js'
 import { shortDate } from '../dates.js'
+import { linkConflict, linkProblemText, LINK_ENDS, LINK_TYPES, linkType, linkTypeLabel, successorSentence } from '../dependencies.js'
 import { tableSubtaskFilter } from '../fold.js'
 import { tbt } from '../l10n.js'
 import { isTaskReadOnly } from '../store/board.js'
 import { STATUS } from '../status.js'
 import { treeRows } from '../table.js'
-import { barGeometry, dayAt, DEFAULT_SCALE, dragDays, drawnDates, groupTimelineTasks, headerCells, joinSpans, outsideParent, rowSpan, SCALES, timelineColumns, visibleRange } from '../timeline.js'
-import { followUpDate, followUpState } from '../waiting.js'
+import { barGeometry, dayAt, DEFAULT_SCALE, dragDays, drawnDates, groupTimelineTasks, headerCells, joinSpans, linkPath, outsideParent, rowSpan, SCALES, timelineColumns, visibleRange } from '../timeline.js'
+import { followUpDate, followUpState, hasWaitingTag } from '../waiting.js'
 import TbAvatar from './TbAvatar.vue'
 import { uidToHexColor } from '../../utils/color.js'
 
-import { showError } from '@nextcloud/dialogs'
+import { showError, showInfo } from '@nextcloud/dialogs'
 import moment from '@nextcloud/moment'
 import NcButton from '@nextcloud/vue/components/NcButton'
 
@@ -245,6 +363,7 @@ import AlertCircleOutline from 'vue-material-design-icons/AlertCircleOutline.vue
 import BellAlertOutline from 'vue-material-design-icons/BellAlertOutline.vue'
 import BellOutline from 'vue-material-design-icons/BellOutline.vue'
 import ChevronRight from 'vue-material-design-icons/ChevronRight.vue'
+import Delete from 'vue-material-design-icons/TrashCanOutline.vue'
 import TimerSandEmpty from 'vue-material-design-icons/TimerSandEmpty.vue'
 
 import { mapGetters } from 'vuex'
@@ -265,6 +384,7 @@ export default {
 		BellAlertOutline,
 		BellOutline,
 		ChevronRight,
+		Delete,
 		NcButton,
 		TbAvatar,
 		TimerSandEmpty,
@@ -292,6 +412,12 @@ export default {
 			draw: null,
 			// Moving a follow-up bell
 			bell: null,
+			// Drawing a dependency from the dot at an end of a bar
+			link: null,
+			// The menu of a dependency (clicked arrow)
+			linkMenu: null,
+			// Height of a row (see --tb-row-h)
+			rowHeight: 36,
 			// Phones: only show (no dragging)
 			touch: false,
 		}
@@ -439,6 +565,55 @@ export default {
 			}
 			return rows
 		},
+		showLinks() {
+			return this.view.timelineLinks !== false
+		},
+		linkTypes() {
+			return LINK_TYPES.map(value => ({ value, label: linkTypeLabel(value) }))
+		},
+		/**
+		 * The arrows of the dependencies between rows that are shown with a bar
+		 *
+		 * @return {Array} [{ key, from, to, type, path, conflict, title }]
+		 */
+		links() {
+			if (!this.showLinks) {
+				return []
+			}
+			const rowOf = new Map()
+			this.rows.forEach((row, index) => {
+				if (!row.group && row.span) {
+					rowOf.set(row.task.key, { row, index })
+				}
+			})
+			const result = []
+			for (const [key, { row, index }] of rowOf) {
+				for (const link of this.$store.getters.tbSuccessors(row.task)) {
+					const target = rowOf.get(link.task.key)
+					if (!target) {
+						continue
+					}
+					const [fromEnd, toEnd] = LINK_ENDS[link.type]
+					const path = linkPath(
+						{ x: this.anchorX(row, fromEnd), y: this.rowY(index), out: fromEnd === 'end' ? 1 : -1 },
+						{ x: this.anchorX(target.row, toEnd), y: this.rowY(target.index), entry: toEnd === 'start' ? 1 : -1 },
+						10,
+						this.rowHeight,
+					)
+					const conflict = linkConflict(row.task, link.task, link.type, link.gap)
+					result.push({
+						key: key + '>' + link.task.key,
+						from: row.task,
+						to: link.task,
+						type: link.type,
+						path,
+						conflict,
+						title: row.task.summary + ' → ' + link.task.summary + ' · ' + linkTypeLabel(link.type) + (conflict ? ' · ' + tbt('The dates do not fit') : ''),
+					})
+				}
+			}
+			return result
+		},
 		/**
 		 * Rows that are tasks (not group headers)
 		 *
@@ -515,6 +690,7 @@ export default {
 		window.removeEventListener('resize', this.onResize)
 		clearInterval(this.timer)
 		this.stopDrag()
+		this.closeLinkMenu()
 	},
 	updated() {
 		this.updateHeight()
@@ -565,10 +741,11 @@ export default {
 		},
 		/**
 		 * @param {object} task The task
-		 * @return {moment|null} The follow-up day of an open waiting task
+		 * @return {moment|null} The follow-up day of an open task with the waiting tag
+		 *   (a task that only waits for its start has its bar there already)
 		 */
 		followUpOf(task) {
-			return !task.closed && followUpState(task, this.now) ? followUpDate(task, this.now) : null
+			return !task.closed && hasWaitingTag(task) && followUpState(task, this.now) ? followUpDate(task, this.now) : null
 		},
 		/**
 		 * @param {object} row The row
@@ -654,10 +831,25 @@ export default {
 					color: this.colorOf(entry.task),
 					editable: this.canEdit(entry.task, span),
 					drawable: !span && this.canChange(entry.task),
+					linkable: !!span && this.showLinks && this.canChange(entry.task),
 				})
 			}
 		},
 		barStyle(row) {
+			const { left, width } = this.barBox(row)
+			return {
+				left: left + 'px',
+				width: width + 'px',
+				'--tb-bar': row.color,
+			}
+		},
+		/**
+		 * Position of a bar as drawn (also while it is dragged)
+		 *
+		 * @param {object} row The row
+		 * @return {object} { left, width } in pixels
+		 */
+		barBox(row) {
 			const geometry = barGeometry(row.span, this.range.start, this.dayWidth, this.range.days)
 			let { left, width } = geometry
 			if (this.drag && this.drag.keys.has(row.task.key)) {
@@ -671,11 +863,35 @@ export default {
 					width = Math.max(this.dayWidth, width + days)
 				}
 			}
-			return {
-				left: left + 'px',
-				width: (row.span.milestone ? this.dayWidth : width) + 'px',
-				'--tb-bar': row.color,
+			return { left, width: row.span.milestone ? this.dayWidth : width }
+		},
+		/**
+		 * Where an arrow starts or ends at a bar
+		 *
+		 * @param {object} row The row
+		 * @param {string} end 'start' or 'end'
+		 * @return {number} Pixels from the first day shown
+		 */
+		anchorX(row, end) {
+			const { left, width } = this.barBox(row)
+			if (row.span.milestone) {
+				// The point is a diamond in the middle of its day
+				const middle = left + this.dayWidth / 2
+				return end === 'end' ? middle + 9 : middle - 9
 			}
+			return end === 'end' ? left + width : left
+		},
+		/**
+		 * @param {number} index Index of the row
+		 * @return {number} Middle of the row in pixels from the top of the rows
+		 */
+		rowY(index) {
+			return index * this.rowHeight + this.rowHeight / 2
+		},
+		linkTypeLabel,
+		linkProblemText,
+		successorSentenceFor(type) {
+			return this.linkMenu ? successorSentence(type, this.linkMenu.from.summary) : ''
 		},
 		/**
 		 * @param {object} row The row
@@ -843,6 +1059,138 @@ export default {
 				showError(tbt('Could not change the follow-up.'))
 			}
 		},
+		/**
+		 * Starts drawing a dependency from the dot at one end of a bar
+		 *
+		 * @param {object} row The row of the predecessor
+		 * @param {string} end 'start' or 'end'
+		 * @param {PointerEvent} event The event
+		 */
+		startLink(row, end, event) {
+			if (event.button !== 0) {
+				return
+			}
+			event.preventDefault()
+			this.closeLinkMenu()
+			const index = this.rows.indexOf(row)
+			const x = this.anchorX(row, end)
+			const y = this.rowY(index)
+			this.link = { row, end, x0: x, y0: y, x, y, target: null, type: null, problem: null }
+			window.addEventListener('pointermove', this.onLinkMove)
+			window.addEventListener('pointerup', this.onLinkEnd, { once: true })
+			window.addEventListener('keydown', this.onDragKey)
+		},
+		onLinkMove(event) {
+			const link = this.link
+			const body = this.$refs.body
+			if (!link || !body) {
+				return
+			}
+			const lane = body.querySelector('.tb-timeline__lane')
+			link.x = event.clientX - (lane ? lane.getBoundingClientRect().left : 0)
+			link.y = event.clientY - body.getBoundingClientRect().top
+			// The row under the pointer (bells or dots may lie on top of the bar)
+			const rowElement = document.elementFromPoint(event.clientX, event.clientY)?.closest?.('.tb-timeline__row')
+			const bar = rowElement?.querySelector('.tb-timeline__bar:not(.tb-timeline__bar--preview)')
+			const box = bar?.getBoundingClientRect()
+			const key = box && event.clientX >= box.left - 8 && event.clientX <= box.right + 8 ? rowElement.dataset.taskKey : null
+			const target = key && key !== link.row.task.key ? this.taskRows.find(row => row.task.key === key) : null
+			if (!target) {
+				link.target = null
+				return
+			}
+			const targetEnd = event.clientX < box.left + box.width / 2 ? 'start' : 'end'
+			link.target = key
+			link.targetRow = target
+			link.type = linkType(link.end, targetEnd)
+			link.problem = this.$store.getters.tbLinkProblem(link.row.task, target.task)
+		},
+		async onLinkEnd() {
+			const link = this.link
+			this.stopDrag()
+			if (!link || !link.target || link.problem) {
+				return
+			}
+			try {
+				const { problem, pushed } = await this.$store.dispatch('tbAddLink', { from: link.row.task, to: link.targetRow.task, type: link.type, push: true })
+				if (problem) {
+					showError(linkProblemText(problem))
+				} else {
+					this.showPushed(pushed)
+				}
+			} catch (error) {
+				console.error(error)
+				showError(tbt('Could not change the dependency.'))
+			}
+		},
+		/**
+		 * @param {number} pushed How many dependent tasks were moved along
+		 */
+		showPushed(pushed) {
+			if (pushed === 1) {
+				showInfo(tbt('One dependent task moved along'))
+			} else if (pushed > 1) {
+				showInfo(tbt('{count} dependent tasks moved along', { count: pushed }))
+			}
+		},
+		/**
+		 * Opens the menu of a dependency at the clicked arrow
+		 *
+		 * @param {object} item The arrow (see links)
+		 * @param {MouseEvent} event The click
+		 */
+		openLinkMenu(item, event) {
+			const view = this.$el.getBoundingClientRect()
+			this.linkMenu = {
+				key: item.key,
+				from: item.from,
+				to: item.to,
+				type: item.type,
+				conflict: item.conflict,
+				editable: !this.touch && !isTaskReadOnly(item.from),
+				x: Math.min(event.clientX - view.left + 8, Math.max(view.width - 300, 0)),
+				y: event.clientY - view.top + 8,
+			}
+			setTimeout(() => window.addEventListener('pointerdown', this.onOutsideLinkMenu), 0)
+			this.$nextTick(() => this.$refs.linkMenu?.querySelector('input:checked')?.focus())
+		},
+		closeLinkMenu() {
+			window.removeEventListener('pointerdown', this.onOutsideLinkMenu)
+			this.linkMenu = null
+		},
+		onOutsideLinkMenu(event) {
+			if (!this.$refs.linkMenu?.contains(event.target)) {
+				this.closeLinkMenu()
+			}
+		},
+		async setLinkType(type) {
+			const menu = this.linkMenu
+			if (!menu) {
+				return
+			}
+			try {
+				await this.$store.dispatch('tbSetLinkType', { from: menu.from, to: menu.to, type })
+				if (this.linkMenu) {
+					this.linkMenu = { ...this.linkMenu, type, key: menu.key, conflict: linkConflict(menu.from, menu.to, type) }
+				}
+			} catch (error) {
+				console.error(error)
+				showError(tbt('Could not change the dependency.'))
+			}
+		},
+		async removeLink() {
+			const menu = this.linkMenu
+			this.closeLinkMenu()
+			if (!menu) {
+				return
+			}
+			try {
+				await this.$store.dispatch('tbRemoveLink', { from: menu.from, to: menu.to })
+			} catch (error) {
+				console.error(error)
+				showError(tbt('Could not change the dependency.'))
+			}
+		},
 		openPending() {
 			if (this.pendingOpen) {
 				this.openTask(this.pendingOpen)
@@ -871,10 +1219,13 @@ export default {
 			window.removeEventListener('pointerup', this.onDrawEnd)
 			window.removeEventListener('pointermove', this.onBellMove)
 			window.removeEventListener('pointerup', this.onBellEnd)
+			window.removeEventListener('pointermove', this.onLinkMove)
+			window.removeEventListener('pointerup', this.onLinkEnd)
 			window.removeEventListener('keydown', this.onDragKey)
 			this.drag = null
 			this.draw = null
 			this.bell = null
+			this.link = null
 		},
 		async onDragEnd() {
 			const drag = this.drag
@@ -891,7 +1242,8 @@ export default {
 				return
 			}
 			try {
-				await this.$store.dispatch('tbShiftDates', { task: drag.task, days, edge: drag.edge, withSubtasks: drag.edge === 'move' })
+				const { pushed } = await this.$store.dispatch('tbShiftDates', { task: drag.task, days, edge: drag.edge, withSubtasks: drag.edge === 'move', pushSuccessors: true })
+				this.showPushed(pushed)
 			} catch (error) {
 				console.error(error)
 				showError(tbt('The dates could not be changed.'))
@@ -903,6 +1255,7 @@ export default {
 
 <style lang="scss" scoped>
 .tb-timeline-view {
+	position: relative;
 	padding: calc(2 * var(--default-grid-baseline)) calc(3 * var(--default-grid-baseline)) calc(3 * var(--default-grid-baseline));
 }
 
@@ -1044,6 +1397,7 @@ export default {
 
 	&__row {
 		display: flex;
+		box-sizing: border-box;
 		height: var(--tb-row-h);
 		border-bottom: 1px solid color-mix(in srgb, var(--color-border) 60%, transparent);
 
@@ -1167,6 +1521,7 @@ export default {
 	// Group of rows (list or person)
 	&__group {
 		display: flex;
+		box-sizing: border-box;
 		height: var(--tb-row-h);
 		border-bottom: 1px solid var(--color-border);
 		background-color: color-mix(in srgb, var(--color-background-dark) 45%, transparent);
@@ -1321,6 +1676,115 @@ export default {
 		}
 	}
 
+	// Dependencies: arrows above the lanes, below the left column
+	&__links {
+		position: absolute;
+		top: 0;
+		z-index: 1;
+		overflow: visible;
+		pointer-events: none;
+	}
+
+	&__link {
+		cursor: pointer;
+		pointer-events: visibleStroke;
+
+		&:hover .tb-timeline__link-line,
+		&--active .tb-timeline__link-line {
+			stroke-width: 2.5;
+			stroke: var(--color-main-text);
+		}
+
+		&--conflict .tb-timeline__link-line,
+		&--conflict:hover .tb-timeline__link-line {
+			stroke: var(--tb-viz-overdue);
+		}
+	}
+
+	&__link-line {
+		fill: none;
+		stroke: var(--color-text-maxcontrast);
+		stroke-width: 1.5;
+	}
+
+	// Wide invisible line, easier to hit
+	&__link-hit {
+		fill: none;
+		stroke: transparent;
+		stroke-width: 10;
+	}
+
+	&__link-head {
+		fill: var(--color-text-maxcontrast);
+
+		&--conflict {
+			fill: var(--tb-viz-overdue);
+		}
+	}
+
+	&__link-draft {
+		stroke: var(--color-primary-element);
+		stroke-width: 2;
+		stroke-dasharray: 5 4;
+
+		&--denied {
+			stroke: var(--tb-viz-overdue);
+		}
+	}
+
+	&__link-hint {
+		position: absolute;
+		z-index: 5;
+		padding: 2px 8px;
+		border-radius: 6px;
+		background-color: var(--color-primary-element);
+		color: var(--color-primary-element-text);
+		font-size: 12px;
+		white-space: nowrap;
+		pointer-events: none;
+
+		&--denied {
+			background-color: var(--tb-viz-overdue);
+			color: #fff;
+		}
+	}
+
+	// Dots at both ends of a bar (shown when the row is hovered)
+	&__link-dot {
+		position: absolute;
+		top: 50%;
+		z-index: 1;
+		width: 10px;
+		height: 10px;
+		margin-top: -5px;
+		border: 2px solid var(--color-primary-element);
+		border-radius: 50%;
+		background-color: var(--tb-card-bg, var(--color-main-background));
+		cursor: crosshair;
+		opacity: 0;
+		transition: opacity 100ms ease;
+	}
+
+	&__row:hover &__link-dot,
+	&--linking &__link-dot {
+		opacity: 1;
+	}
+
+	&__bar--link-target {
+		outline: 2px solid var(--color-primary-element);
+		outline-offset: 2px;
+	}
+
+	&__bar--link-denied {
+		outline: 2px dashed var(--tb-viz-overdue);
+		outline-offset: 2px;
+		cursor: not-allowed;
+	}
+
+	&--linking {
+		cursor: crosshair;
+	}
+
 	&__waiting-icon {
 		flex: 0 0 auto;
 		color: var(--tb-viz-waiting);
@@ -1412,6 +1876,37 @@ export default {
 		border-radius: 3px;
 	}
 
+	&-link {
+		width: 22px;
+		height: 0;
+		border-top: 2px solid var(--color-text-maxcontrast);
+		position: relative;
+
+		&::after {
+			content: '';
+			position: absolute;
+			top: -5px;
+			right: -2px;
+			border: 4px solid transparent;
+			border-left: 6px solid var(--color-text-maxcontrast);
+		}
+
+		&--conflict {
+			border-top-color: var(--tb-viz-overdue);
+
+			&::after {
+				border-left-color: var(--tb-viz-overdue);
+			}
+		}
+	}
+
+	&-dot {
+		width: 10px;
+		height: 10px;
+		border: 2px solid var(--color-primary-element);
+		border-radius: 50%;
+	}
+
 	&-waiting {
 		width: 22px;
 		height: 10px;
@@ -1420,6 +1915,59 @@ export default {
 		background-image: repeating-linear-gradient(135deg,
 			transparent 0 3px,
 			color-mix(in srgb, var(--color-text-maxcontrast) 45%, transparent) 3px 5px);
+	}
+}
+.tb-timeline__link-menu {
+	position: absolute;
+	z-index: 10;
+	width: 290px;
+	padding: 10px;
+	border: 1px solid var(--color-border);
+	border-radius: 12px;
+	background-color: var(--color-main-background);
+	box-shadow: 0 4px 16px rgba(0, 0, 0, .2);
+
+	&-title {
+		margin-bottom: 8px;
+		font-weight: 600;
+		overflow-wrap: anywhere;
+	}
+
+	&-type {
+		display: flex;
+		align-items: flex-start;
+		gap: 8px;
+		padding: 4px 2px;
+		border-radius: 8px;
+		cursor: pointer;
+
+		&:hover {
+			background-color: var(--color-background-hover);
+		}
+
+		input {
+			margin: 3px 0 0;
+		}
+
+		> span {
+			display: flex;
+			flex-direction: column;
+		}
+	}
+
+	&-name {
+		font-weight: 500;
+	}
+
+	&-sentence {
+		font-size: 12px;
+		color: var(--color-text-maxcontrast);
+	}
+
+	&-conflict {
+		margin: 6px 2px;
+		color: var(--tb-viz-overdue);
+		font-size: 12px;
 	}
 }
 </style>

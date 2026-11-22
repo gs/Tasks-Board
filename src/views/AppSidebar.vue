@@ -36,6 +36,10 @@ License along with this library. If not, see <http://www.gnu.org/licenses/>.
 		<!-- Tasks Board: drag handle to change the width -->
 		<TbSidebarResizer />
 		<template v-if="task" #description>
+			<!-- Tasks Board: the whole title, edited in place (moved into the header) -->
+			<Teleport :to="tbTitleHost || 'body'" :disabled="!tbTitleHost">
+				<TbSidebarTitle ref="tbTitle" :task="task" :read-only="readOnly" />
+			</Teleport>
 			<!-- Tasks Board: fields in groups -->
 			<div v-if="!readOnly || task.start || task.due" class="tb-group tb-group--dates" :data-title="tbt('Dates')">
 				<DateTimePickerItem v-show="!readOnly || task.start"
@@ -78,6 +82,8 @@ License along with this library. If not, see <http://www.gnu.org/licenses/>.
 					</template>
 				</RecurrenceItem>
 			</div>
+			<!-- Tasks Board: what the task waits for and what comes after it -->
+			<TbDependencies :task="task" :read-only="readOnly" />
 			<div class="tb-group tb-group--assignment" :data-title="tbt('Assignment')">
 				<CalendarPickerItem :disabled="readOnly"
 					:calendar="task.calendar"
@@ -321,6 +327,8 @@ import TextItem from '../components/AppSidebar/TextItem.vue'
 import NotesItem from '../tb/components/TbNotesItem.vue'
 import TbAssigneeItem from '../tb/components/TbAssigneeItem.vue'
 import TbSidebarResizer from '../tb/components/TbSidebarResizer.vue'
+import TbDependencies from '../tb/components/TbDependencies.vue'
+import TbSidebarTitle from '../tb/components/TbSidebarTitle.vue'
 import TbStatusItem from '../tb/components/TbStatusItem.vue'
 import TbTagListHint from '../tb/components/TbTagListHint.vue'
 import { tbt } from '../tb/l10n.js'
@@ -408,6 +416,8 @@ export default {
 		NotesItem,
 		TbAssigneeItem,
 		TbSidebarResizer,
+		TbDependencies,
+		TbSidebarTitle,
 		TbStatusItem,
 		TbTagListHint,
 		TaskCheckbox,
@@ -432,6 +442,8 @@ export default {
 	data() {
 		return {
 			editingSummary: false,
+			// Tasks Board: the header row the title is moved into (TbSidebarTitle)
+			tbTitleHost: null,
 			editingStart: false,
 			editingDue: false,
 			loading: false,
@@ -745,6 +757,12 @@ export default {
 		subscribe('tasks:task:deleted', this.handleTaskDeletion)
 		subscribe('tasks:open-appsidebar-tab', this.openAppSidebarTab)
 		subscribe('tasks:edit-appsidebar-summary', this.editSummary)
+		// Tasks Board: the header row for the title
+		this.$nextTick(this.tbFindTitleHost)
+	},
+	updated() {
+		// Tasks Board: the header is drawn again when the sidebar opens a task
+		this.tbFindTitleHost()
 	},
 	beforeUnmount() {
 		unsubscribe('tasks:close-appsidebar', this.closeAppSidebar)
@@ -843,10 +861,22 @@ export default {
 			if (this.readOnly) {
 				return
 			}
-			if (!this.editingSummary && editing) {
-				this.newSummary = this.task.summary
+			// Tasks Board: the title is edited in place (TbSidebarTitle), the whole title selected;
+			// a moment later, so a closing menu does not take the focus back
+			if (editing) {
+				setTimeout(() => this.$refs.tbTitle?.start([0, this.task?.summary.length ?? 0]), 150)
 			}
-			this.editingSummary = editing
+		},
+
+		/**
+		 * Tasks Board: where the title goes (the name row of the sidebar header)
+		 */
+		tbFindTitleHost() {
+			const root = this.$el?.querySelector ? this.$el : document
+			const host = root.querySelector('.app-sidebar-header__mainname-container') || null
+			if (host !== this.tbTitleHost) {
+				this.tbTitleHost = host
+			}
 		},
 
 		updateSummary(summary) {
