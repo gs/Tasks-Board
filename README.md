@@ -17,6 +17,10 @@
 </p>
 
 <p align="center">
+  <a href="https://ateeducacion.github.io/nextcloud-playground/?blueprint-url=https://raw.githubusercontent.com/its-sven/Tasks-Board/tasks-board/docs/playground/blueprint.json" target="_blank" rel="noopener noreferrer"><img src="https://raw.githubusercontent.com/ateeducacion/nextcloud-playground/refs/heads/main/assets/playground-preview-button.svg" alt="Try Tasks Board in the Nextcloud Playground" width="224"></a>
+</p>
+
+<p align="center">
   <img src="screenshots/board.png" alt="Board with the columns Open, In progress, Waiting, Done and Cancelled">
 </p>
 
@@ -77,7 +81,15 @@ Everything the Tasks app does (lists, subtasks, smart collections, start and due
   </tr>
 </table>
 
+## Try it online
+
+The [Nextcloud Playground](https://ateeducacion.github.io/nextcloud-playground/?blueprint-url=https://raw.githubusercontent.com/its-sven/Tasks-Board/tasks-board/docs/playground/blueprint.json) starts a complete Nextcloud with the latest release of Tasks Board right in your browser, with nothing to install. It runs entirely on your computer (WebAssembly): nothing is stored on a server, and closing the tab starts over. You are signed in as `admin`. Things that need a real server, such as instant updates from other people or notifications from background jobs, cannot be tried there. The setup is in [`docs/playground/blueprint.json`](docs/playground/blueprint.json).
+
 ## Installation
+
+### From the Nextcloud App Store
+
+Search for **Tasks Board** under »Apps« in your Nextcloud, or see [apps.nextcloud.com/apps/tasks_board](https://apps.nextcloud.com/apps/tasks_board).
 
 ### From a release
 
