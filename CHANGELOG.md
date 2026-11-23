@@ -1,3 +1,9 @@
+## 1.6.1 - 2026-11-23
+
+### Fixed
+- Lists of Deck boards ("Deck: …") disappeared after a few seconds and an open one was closed with the note that it is no longer available. The live update now keeps lists that have no sync token and compares them by the changes of their entries, so changes in Deck show up as well
+- When a list was removed, the note and the jump to the start page could also hit another list whose name begins the same (for example "board-3" and "board-31")
+
 ## 1.6.0 - 2026-11-22
 
 ### Added
