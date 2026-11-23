@@ -1,4 +1,4 @@
-import { homeChanges, LiveSync, normalizeHref, parseSyncResponse, parseTokens, planChanges } from '../../../../src/tb/live.js'
+import { homeChanges, LiveSync, normalizeHref, parseSyncResponse, parseTokens, planChanges, showsList } from '../../../../src/tb/live.js'
 
 import Axios from '@nextcloud/axios'
 import { listen } from '@nextcloud/notify_push'
@@ -69,7 +69,9 @@ describe('live updates', () => {
  <d:response><d:href>/remote.php/dav/calendars/admin/M%C3%BCll_shared_by_max/</d:href><d:propstat><d:prop><d:sync-token>http://sabre.io/ns/sync/9</d:sync-token></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>
 </d:multistatus>`
 		const tokens = parseTokens(xml)
+		// Collections without a token (here the home itself) are kept with null
 		expect([...tokens.entries()]).toEqual([
+			['/remote.php/dav/calendars/admin/', null],
 			['/remote.php/dav/calendars/admin/work/', 'http://sabre.io/ns/sync/7'],
 			['/remote.php/dav/calendars/admin/Müll_shared_by_max/', 'http://sabre.io/ns/sync/9'],
 		])
@@ -94,7 +96,7 @@ describe('live updates', () => {
 		expect(listen).toHaveBeenCalledWith('notify_activity', sync.onPush)
 		expect(sync.push).toBe(true)
 		sync.onPush()
-		expect(run).toHaveBeenCalledWith({ force: true })
+		expect(run).toHaveBeenCalledWith({ force: true, wake: true })
 		sync.stop()
 	})
 
@@ -112,5 +114,74 @@ describe('live updates', () => {
 		})
 		const sync = new LiveSync({ state: { calendars: { calendars: [work, events] } } })
 		expect(await sync.changedCalendars([work, events])).toEqual([work])
+	})
+
+	it('keeps lists without a sync token (Deck boards), removes only lists that are gone', () => {
+		const home = '/remote.php/dav/calendars/admin/'
+		const xml = `<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:" xmlns:nc="http://nextcloud.com/ns">
+ <d:response><d:href>${home}</d:href><d:propstat><d:prop/><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>
+ <d:response><d:href>${home}work/</d:href><d:propstat><d:prop><d:sync-token>http://sabre.io/ns/sync/7</d:sync-token></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>
+ <d:response><d:href>${home}app-generated--deck--board-3/</d:href><d:propstat><d:prop/><d:status>HTTP/1.1 200 OK</d:status></d:propstat><d:propstat><d:prop><d:sync-token/><nc:deleted-at/></d:prop><d:status>HTTP/1.1 404 Not Found</d:status></d:propstat></d:response>
+</d:multistatus>`
+		const current = parseTokens(xml)
+		expect(current.get(home + 'app-generated--deck--board-3/')).toBeNull()
+		const list = id => ({ id, supportsTasks: true, dav: { url: home + id + '/' } })
+		const work = list('work')
+		const deck = list('app-generated--deck--board-3')
+		const gone = list('app-generated--deck--board-31')
+		const changes = homeChanges(current, [work, deck, gone], new Set([home]))
+		expect(changes.removed).toEqual([gone])
+		expect(changes.added).toEqual([])
+	})
+
+	it('knows whether a page shows a list by the whole path part', () => {
+		const path = '/index.php/apps/tasks_board/calendars/app-generated--deck--board-31/tasks/card-6.ics'
+		expect(showsList(path, 'app-generated--deck--board-31')).toBe(true)
+		expect(showsList(path, 'app-generated--deck--board-3')).toBe(false)
+		expect(showsList('/index.php/apps/tasks_board/calendars/work', 'work')).toBe(true)
+		expect(showsList('/index.php/apps/tasks_board/collections/all', 'work')).toBe(false)
+	})
+
+	it('compares lists without a sync token by ETags: on waking up, when open, every few minutes', async () => {
+		const home = '/remote.php/dav/calendars/admin/'
+		const deck = { id: 'app-generated--deck--board-2', supportsTasks: true, tasks: {}, dav: { url: home + 'app-generated--deck--board-2/' } }
+		const work = { id: 'work', supportsTasks: true, tasks: {}, dav: { url: home + 'work/', syncToken: 't1' } }
+		Axios.mockResolvedValue({
+			data: `<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:">
+ <d:response><d:href>${home}work/</d:href><d:propstat><d:prop><d:sync-token>t1</d:sync-token></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>
+ <d:response><d:href>${home}app-generated--deck--board-2/</d:href><d:propstat><d:prop/><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>
+</d:multistatus>`,
+		})
+		const store = { state: { calendars: { calendars: [work, deck] } }, commit: vi.fn() }
+		const sync = new LiveSync(store)
+		// First time: compared, the list stays
+		expect(await sync.changedCalendars([work, deck])).toEqual([deck])
+		expect(store.commit).not.toHaveBeenCalled()
+		sync.withoutToken.set(deck.id, Date.now())
+		expect(await sync.changedCalendars([work, deck])).toEqual([])
+		expect(await sync.changedCalendars([work, deck], { wake: true })).toEqual([deck])
+
+		// The comparison: a PROPFIND with ETags, changed and new entries are fetched, missing ones removed
+		const old = { uid: 'old', key: 'old~deck', dav: { url: home + 'app-generated--deck--board-2/card-1.ics', etag: '"a"' } }
+		const same = { uid: 'same', key: 'same~deck', dav: { url: home + 'app-generated--deck--board-2/card-2.ics', etag: '"b"' } }
+		deck.tasks = { old, same }
+		deck.dav.calendarMultiget = vi.fn().mockResolvedValue([])
+		Axios.mockReset()
+		Axios.mockResolvedValue({
+			data: `<?xml version="1.0"?>
+<d:multistatus xmlns:d="DAV:">
+ <d:response><d:href>${home}app-generated--deck--board-2/</d:href><d:propstat><d:prop/><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>
+ <d:response><d:href>${home}app-generated--deck--board-2/card-2.ics</d:href><d:propstat><d:prop><d:getetag>"b"</d:getetag></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>
+ <d:response><d:href>${home}app-generated--deck--board-2/card-3.ics</d:href><d:propstat><d:prop><d:getetag>"c"</d:getetag></d:prop><d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>
+</d:multistatus>`,
+		})
+		const removed = vi.spyOn(sync, 'removeTask').mockImplementation(() => {})
+		await sync.syncCalendar(deck)
+		expect(Axios.mock.calls[0][0].method).toBe('PROPFIND')
+		expect(removed).toHaveBeenCalledWith(old)
+		expect(deck.dav.calendarMultiget).toHaveBeenCalledWith([home + 'app-generated--deck--board-2/card-3.ics'])
+		expect(sync.tokens.has(deck.id)).toBe(false)
 	})
 })

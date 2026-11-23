@@ -35,6 +35,8 @@ const DAV = 'DAV:'
 const NC = 'http://nextcloud.com/ns'
 const INTERVAL = 30 * 1000
 const MIN_GAP = 3 * 1000
+// Lists without a sync token (e.g. Deck boards) are compared by the ETags of their entries this often
+const NO_TOKEN_GAP = 2 * 60 * 1000
 const MULTIGET_CHUNK = 50
 const PARALLEL = 4
 const CHANNEL = 'tasks_board.live'
@@ -178,9 +180,10 @@ function isBusy(task) {
 /**
  * Reads the current sync tokens of all lists below a calendar home (one request).
  * Lists in the trash bin are still listed there (with a deletion date) and are left out.
+ * Collections without a sync token (e.g. Deck boards) are kept with null: they exist.
  *
  * @param {string} xml The multistatus document of a PROPFIND
- * @return {Map} Decoded href of the list => token
+ * @return {Map} Decoded href of the collection => token (null without one)
  */
 export function parseTokens(xml) {
 	const doc = new DOMParser().parseFromString(xml, 'application/xml')
@@ -193,8 +196,8 @@ export function parseTokens(xml) {
 		const href = nodes.find(node => node.namespaceURI === DAV && node.localName === 'href')?.textContent.trim()
 		const token = nodes.find(node => node.namespaceURI === DAV && node.localName === 'sync-token')?.textContent.trim()
 		const deleted = nodes.find(node => node.namespaceURI === NC && node.localName === 'deleted-at')?.textContent.trim()
-		if (href && token && !deleted) {
-			tokens.set(normalizeHref(href).replace(/\/?$/, '/'), token)
+		if (href && !deleted) {
+			tokens.set(normalizeHref(href).replace(/\/?$/, '/'), token || null)
 		}
 	}
 	return tokens
@@ -268,6 +271,38 @@ async function requestSync(url, token) {
 	return parseSyncResponse(response.data)
 }
 
+/**
+ * Lists the entries of a list with their ETags (for lists that cannot send
+ * the changes since a sync token, like Deck boards)
+ *
+ * @param {string} url The URL of the list
+ * @return {Promise<object>} Like a full sync answer: { token: null, changed: [{ href, etag }], removed: [] }
+ */
+async function requestEtags(url) {
+	const response = await Axios({
+		method: 'PROPFIND',
+		url,
+		data: '<?xml version="1.0" encoding="utf-8"?><d:propfind xmlns:d="DAV:"><d:prop><d:getetag/></d:prop></d:propfind>',
+		headers: { 'Content-Type': 'application/xml; charset=utf-8', Depth: '1' },
+		responseType: 'text',
+		transformResponse: [data => data],
+	})
+	return { ...parseSyncResponse(response.data), token: null }
+}
+
+/**
+ * Whether a path shows a list (the list itself or one of its tasks), comparing
+ * the whole path part: "board-3" is not "board-31"
+ *
+ * @param {string} path The decoded path of the page
+ * @param {string} calendarId The id of the list
+ * @return {boolean}
+ */
+export function showsList(path, calendarId) {
+	const parts = String(path).split('/')
+	return parts.some((part, index) => part === 'calendars' && parts[index + 1] === calendarId)
+}
+
 export class LiveSync {
 
 	/**
@@ -285,6 +320,8 @@ export class LiveSync {
 		this.broadcastTimer = null
 		// Collections below the calendar home that are no lists
 		this.ignored = new Set()
+		// Lists without a sync token: calendar id → time of the last comparison by ETags
+		this.withoutToken = new Map()
 		this.push = false
 	}
 
@@ -324,14 +361,14 @@ export class LiveSync {
 
 	onWake = () => {
 		if (document.visibilityState === 'visible') {
-			this.sync()
+			this.sync({ wake: true })
 		}
 	}
 
 	/** New activity on the server: compare now (a hidden tab does it when it is shown again) */
 	onPush = () => {
 		if (document.visibilityState === 'visible') {
-			this.sync({ force: true })
+			this.sync({ force: true, wake: true })
 		}
 	}
 
@@ -349,9 +386,10 @@ export class LiveSync {
 	 *
 	 * @param {object} options Options
 	 * @param {boolean} options.force Also right after the last round
+	 * @param {boolean} options.wake Also compare the lists without a sync token now (tab shown, server activity)
 	 * @return {Promise}
 	 */
-	async sync({ force = false } = {}) {
+	async sync({ force = false, wake = false } = {}) {
 		if (this.running) {
 			this.again = true
 			return this.running
@@ -364,7 +402,7 @@ export class LiveSync {
 				this.again = false
 				this.lastRun = Date.now()
 				// Only the lists whose sync token changed (one request per calendar home)
-				const calendars = await this.changedCalendars([...this.store.state.calendars.calendars])
+				const calendars = await this.changedCalendars([...this.store.state.calendars.calendars], { wake })
 				// A few lists at the same time
 				const queue = [...calendars]
 				const worker = async () => {
@@ -392,10 +430,16 @@ export class LiveSync {
 	 * home are loaded, lists that are gone are removed. Calendars without
 	 * tasks (only events) are known, but never synced.
 	 *
+	 * Lists without a sync token (e.g. Deck boards) cannot tell what changed:
+	 * they are compared by ETags when the tab wakes up, when they are open and
+	 * every few minutes.
+	 *
 	 * @param {Array} calendars All lists and calendars
+	 * @param {object} options Options
+	 * @param {boolean} options.wake Compare the lists without a sync token now
 	 * @return {Promise<Array>} The lists to sync
 	 */
-	async changedCalendars(calendars) {
+	async changedCalendars(calendars, { wake = false } = {}) {
 		const homes = new Map()
 		for (const calendar of calendars) {
 			const url = calendar.dav?.url
@@ -418,6 +462,8 @@ export class LiveSync {
 				result.push(...list.filter(calendar => calendar.supportsTasks))
 				continue
 			}
+			// The home itself is no list
+			this.ignored.add(listHref(home))
 			const { added, removed } = homeChanges(current, list, this.ignored)
 			if (added.length) {
 				await this.loadLists(added)
@@ -429,8 +475,21 @@ export class LiveSync {
 				if (removed.includes(calendar) || !calendar.supportsTasks) {
 					continue
 				}
+				const href = listHref(calendar.dav.url)
+				if (current.has(href) && current.get(href) === null) {
+					// No sync token: compare by ETags now and then
+					const last = this.withoutToken.get(calendar.id)
+					if (last === undefined) {
+						this.withoutToken.set(calendar.id, 0)
+					}
+					if (wake || this.isOpen(calendar) || Date.now() - (last || 0) >= NO_TOKEN_GAP || this.pending.get(calendar.id)?.size) {
+						result.push(calendar)
+					}
+					continue
+				}
+				this.withoutToken.delete(calendar.id)
 				const known = this.tokens.has(calendar.id) ? this.tokens.get(calendar.id) : calendar.dav.syncToken
-				const token = current.get(listHref(calendar.dav.url))
+				const token = current.get(href)
 				// Also lists with tasks that were left out last time (being edited)
 				if (!token || !known || token !== known || this.pending.get(calendar.id)?.size) {
 					result.push(calendar)
@@ -475,12 +534,26 @@ export class LiveSync {
 		store.commit('deleteCalendar', calendar)
 		this.tokens.delete(calendar.id)
 		this.pending.delete(calendar.id)
-		const path = decodeURIComponent(window.location.pathname)
-		if (calendar.supportsTasks && path.includes('/calendars/' + calendar.id)) {
+		this.withoutToken.delete(calendar.id)
+		if (calendar.supportsTasks && this.isOpen(calendar)) {
 			// The list was open: back to the start page
 			showInfo(tbt('The list "{list}" is no longer available.', { list: calendar.displayName }))
 			import('../router.js').then(({ default: router }) => router.push('/'))
 		}
+	}
+
+	/**
+	 * @param {object} calendar The list
+	 * @return {boolean} Whether the page shows this list or one of its tasks
+	 */
+	isOpen(calendar) {
+		let path = window.location.pathname
+		try {
+			path = decodeURIComponent(path)
+		} catch {
+			// keep the path
+		}
+		return showsList(path, calendar.id)
 	}
 
 	/**
@@ -492,16 +565,23 @@ export class LiveSync {
 		}
 		let token = this.tokens.has(calendar.id) ? this.tokens.get(calendar.id) : (calendar.dav.syncToken || '')
 		let report
-		try {
-			report = await requestSync(calendar.dav.url, token)
-		} catch (error) {
-			const status = error?.response?.status
-			if (token && [403, 409, 507].includes(status)) {
-				// The token is no longer valid: compare everything
-				token = ''
+		if (this.withoutToken.has(calendar.id)) {
+			// No sync token: all entries with their ETags, compared like a full sync
+			this.withoutToken.set(calendar.id, Date.now())
+			token = ''
+			report = await requestEtags(calendar.dav.url)
+		} else {
+			try {
 				report = await requestSync(calendar.dav.url, token)
-			} else {
-				throw error
+			} catch (error) {
+				const status = error?.response?.status
+				if (token && [403, 409, 507].includes(status)) {
+					// The token is no longer valid: compare everything
+					token = ''
+					report = await requestSync(calendar.dav.url, token)
+				} else {
+					throw error
+				}
 			}
 		}
 		const tasks = Object.values(calendar.tasks)
