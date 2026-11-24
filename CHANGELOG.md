@@ -1,3 +1,8 @@
+## Unreleased
+
+### Added
+- More keyboard shortcuts, all listed under `?`: `H`/`L` and `←`/`→` change the column on the board, `[`/`]` the row, `G`/`Shift+G` jump to the first or last task. With `Shift`, `H`/`L` or `←`/`→` move the task one column (status) to the left or right, `J`/`K` or `↓`/`↑` move a card up or down with the manual order. `S` starts a task or puts it back to open, `1` to `4` show the list, board, table or timeline
+
 ## 1.6.2 - 2026-11-24
 
 ### Added

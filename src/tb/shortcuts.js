@@ -13,13 +13,23 @@ export const TASK_SELECTOR = '.task-item__body[data-task-key], .tb-card[data-tas
 /** Where typing or an open menu/dialog owns the keyboard */
 const OWNER_SELECTOR = 'input, textarea, select, [contenteditable=""], [contenteditable=true], .v-popper__popper, .modal-mask, [role=dialog], [role=menu], [role=listbox]'
 
+/** Columns a task is moved through with the keyboard (never into "Cancelled") */
+export const MOVE_COLUMNS = ['open', 'inProgress', 'waiting', 'done']
+
+/** Keys that may repeat while they are held down */
+const REPEATING_KEYS = ['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'j', 'k', 'h', 'l']
+
+/** The view each number key switches to */
+const VIEW_KEYS = { 1: 'list', 2: 'board', 3: 'table', 4: 'timeline' }
+
 /**
  * Maps a key event to a shortcut action
  *
  * @param {KeyboardEvent} event The event
  * @param {object} context Destructuring object
  * @param {boolean} context.onTask Whether a task row/card has the focus
- * @return {string|null} newTask, next, previous, open, toggle, select, rename, board, help or null
+ * @return {string|null} newTask, next, previous, first, last, columnLeft, columnRight, previousLane, nextLane,
+ * reorderUp, reorderDown, moveLeft, moveRight, startStop, view, open, toggle, select, rename, board, help or null
  */
 export function shortcutAction(event, { onTask = false } = {}) {
 	if (event.ctrlKey || event.metaKey || event.altKey) {
@@ -33,10 +43,53 @@ export function shortcutAction(event, { onTask = false } = {}) {
 		return 'next'
 	case 'k':
 		return 'previous'
+	case 'J':
+		return onTask ? 'reorderDown' : null
+	case 'K':
+		return onTask ? 'reorderUp' : null
 	case 'ArrowDown':
+		if (event.shiftKey) {
+			return onTask ? 'reorderDown' : null
+		}
 		return 'next'
 	case 'ArrowUp':
+		if (event.shiftKey) {
+			return onTask ? 'reorderUp' : null
+		}
 		return 'previous'
+	case 'h':
+		return 'columnLeft'
+	case 'l':
+		return 'columnRight'
+	case 'H':
+		return onTask ? 'moveLeft' : null
+	case 'L':
+		return onTask ? 'moveRight' : null
+	case 'ArrowLeft':
+		if (event.shiftKey) {
+			return onTask ? 'moveLeft' : null
+		}
+		return 'columnLeft'
+	case 'ArrowRight':
+		if (event.shiftKey) {
+			return onTask ? 'moveRight' : null
+		}
+		return 'columnRight'
+	case 'g':
+		return 'first'
+	case 'G':
+		return 'last'
+	case '[':
+		return 'previousLane'
+	case ']':
+		return 'nextLane'
+	case 's':
+		return onTask ? 'startStop' : null
+	case '1':
+	case '2':
+	case '3':
+	case '4':
+		return 'view'
 	case 'Enter':
 		return onTask ? 'open' : null
 	case ' ':
@@ -64,7 +117,7 @@ export function shortcutAction(event, { onTask = false } = {}) {
  * @return {boolean}
  */
 export function shortcutsBlocked(event, doc = document) {
-	if (event.isComposing || (event.repeat && !['ArrowDown', 'ArrowUp', 'j', 'k'].includes(event.key))) {
+	if (event.isComposing || (event.repeat && !REPEATING_KEYS.includes(event.key))) {
 		return true
 	}
 	const target = event.target
@@ -83,6 +136,63 @@ export function shortcutsBlocked(event, doc = document) {
  */
 export function nextViewMode(mode) {
 	return { list: 'board', board: 'table', table: 'timeline', timeline: 'list' }[mode] || 'list'
+}
+
+/**
+ * The view a number key switches to
+ *
+ * @param {string} key The key
+ * @return {string|null}
+ */
+export function viewModeForKey(key) {
+	return VIEW_KEYS[key] || null
+}
+
+/**
+ * The column a task goes to when it is moved one column with the keyboard
+ *
+ * @param {string} column Its current column
+ * @param {number} step +1 (right) or -1 (left)
+ * @return {string|null} The target column, null at the edge
+ */
+export function neighbourColumn(column, step) {
+	// A cancelled task comes back through "Done"
+	if (column === 'cancelled') {
+		return step < 0 ? 'done' : null
+	}
+	const index = MOVE_COLUMNS.indexOf(column)
+	if (index < 0) {
+		return null
+	}
+	return MOVE_COLUMNS[index + step] || null
+}
+
+/**
+ * The column the key S moves a task to: it starts an open task and puts a started one back
+ *
+ * @param {string} column Its current column
+ * @return {string|null}
+ */
+export function startStopColumn(column) {
+	return { open: 'inProgress', inProgress: 'open' }[column] || null
+}
+
+/**
+ * The next column or row that has cards, empty ones are skipped
+ *
+ * @param {number[]} counts Number of cards per column or row
+ * @param {number} current Index of the current one (-1: none)
+ * @param {number} step +1 or -1
+ * @return {number} Its index (-1 if there is none)
+ */
+export function nextFilled(counts, current, step) {
+	const start = current < 0 ? (step > 0 ? 0 : counts.length - 1) : current + step
+	for (let index = start; index >= 0 && index < counts.length; index += step) {
+		if (counts[index] > 0) {
+			return index
+		}
+	}
+	return -1
 }
 
 /**
@@ -110,11 +220,22 @@ export const SHORTCUTS = [
 	{ keys: ['N'], label: 'New task' },
 	{ keys: ['↓', 'J'], label: 'Next task' },
 	{ keys: ['↑', 'K'], label: 'Previous task' },
+	{ keys: ['G'], label: 'First task' },
+	{ keys: ['Shift+G'], label: 'Last task' },
+	{ keys: ['←', 'H'], label: 'Column to the left (board)' },
+	{ keys: ['→', 'L'], label: 'Column to the right (board)' },
+	{ keys: ['[', ']'], label: 'Previous or next row of the board' },
+	{ keys: ['Shift+←', 'Shift+H'], label: 'Move the task one column to the left' },
+	{ keys: ['Shift+→', 'Shift+L'], label: 'Move the task one column to the right' },
+	{ keys: ['Shift+↑', 'Shift+K'], label: 'Move the card up (manual order)' },
+	{ keys: ['Shift+↓', 'Shift+J'], label: 'Move the card down (manual order)' },
+	{ keys: ['S'], label: 'Start the task or put it back to open' },
 	{ keys: ['Enter'], label: 'Open the task' },
 	{ keys: ['Space'], label: 'Complete / reopen the task' },
 	{ keys: ['X'], label: 'Select the task' },
 	{ keys: ['F2'], label: 'Rename the task' },
 	{ keys: ['Esc'], label: 'Clear the selection' },
 	{ keys: ['B'], label: 'Switch between list, board, table and timeline' },
+	{ keys: ['1', '2', '3', '4'], label: 'Show the list, board, table or timeline' },
 	{ keys: ['?'], label: 'Show the keyboard shortcuts' },
 ]

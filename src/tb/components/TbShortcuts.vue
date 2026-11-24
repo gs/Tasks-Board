@@ -30,24 +30,45 @@ Keyboard shortcuts for lists and boards, "?" shows the overview.
 			{{ tbt('Shortcuts do not apply while you type in a field or a menu is open.') }}
 		</p>
 	</NcDialog>
+	<TbWaitDialog v-if="pendingWait"
+		:task="pendingWait.task"
+		@confirm="confirmWait"
+		@cancel="cancelWait" />
 </template>
 
 <script>
-import { viewKeyForRoute } from '../board.js'
+import { MANUAL_COLUMNS, boardColumn, manualOrderChanges, viewKeyForRoute } from '../board.js'
 import { tbt } from '../l10n.js'
-import { moveIndex, nextViewMode, shortcutAction, shortcutsBlocked, SHORTCUTS, TASK_SELECTOR } from '../shortcuts.js'
+import {
+	moveIndex,
+	neighbourColumn,
+	nextFilled,
+	nextViewMode,
+	shortcutAction,
+	shortcutsBlocked,
+	startStopColumn,
+	viewModeForKey,
+	SHORTCUTS,
+	TASK_SELECTOR,
+} from '../shortcuts.js'
 import { isTaskReadOnly } from '../store/board.js'
+import TbWaitDialog from './TbWaitDialog.vue'
 
+import { showError, showInfo } from '@nextcloud/dialogs'
 import { emit, subscribe, unsubscribe } from '@nextcloud/event-bus'
 import NcDialog from '@nextcloud/vue/components/NcDialog'
+
+const CARD_SELECTOR = '.tb-card[data-task-key]'
 
 export default {
 	name: 'TbShortcuts',
 	components: {
 		NcDialog,
+		TbWaitDialog,
 	},
 	data() {
 		return {
+			pendingWait: null,
 			helpOpen: false,
 			shortcuts: SHORTCUTS,
 		}
@@ -106,8 +127,127 @@ export default {
 				this.focusItem(same || items[Math.min(index, items.length - 1)])
 			}, 150)
 		},
+		/**
+		 * The cards of a board column, without the subtasks shown inside them
+		 *
+		 * @param {Element} list The column's list
+		 * @return {Element[]}
+		 */
+		cards(list) {
+			return [...list.children].filter(element => element.matches(CARD_SELECTOR))
+		},
+		/**
+		 * Focuses a card in the neighbouring column of the same row, at the same height if possible
+		 *
+		 * @param {Element|null} item The current card
+		 * @param {number} step +1 (right) or -1 (left)
+		 * @return {boolean} Whether this is a board
+		 */
+		focusColumn(item, step) {
+			const list = item?.closest('.tb-board__cards')
+			if (!list) {
+				const first = document.querySelector('.app-content ' + CARD_SELECTOR)
+				this.focusItem(first)
+				return !!first
+			}
+			const lists = [...list.closest('.tb-board__columns').querySelectorAll('.tb-board__cards')]
+			const target = lists[nextFilled(lists.map(other => this.cards(other).length), lists.indexOf(list), step)]
+			if (target) {
+				const cards = this.cards(target)
+				this.focusItem(cards[Math.min(this.cards(list).indexOf(item), cards.length - 1)])
+			}
+			return true
+		},
+		/**
+		 * Focuses the first card of the previous or next board row
+		 *
+		 * @param {Element|null} item The current card
+		 * @param {number} step +1 (down) or -1 (up)
+		 * @return {boolean} Whether this is a board
+		 */
+		focusLane(item, step) {
+			const lanes = [...document.querySelectorAll('.app-content .tb-board__lane')]
+			if (!lanes.length) {
+				return false
+			}
+			const firstCards = lanes.map(lane => lane.querySelector(CARD_SELECTOR))
+			const current = item ? lanes.indexOf(item.closest('.tb-board__lane')) : -1
+			this.focusItem(firstCards[nextFilled(firstCards.map(card => card ? 1 : 0), current, step)])
+			return true
+		},
+		/**
+		 * Moves the focused task to another board column (status), asking for the follow-up date first if it waits
+		 *
+		 * @param {Element} item The focused row or card
+		 * @param {Function} target Returns the target column for the current one
+		 */
+		moveTask(item, target) {
+			const task = this.findTask(item.dataset.taskKey)
+			if (!task || isTaskReadOnly(task)) {
+				return
+			}
+			const column = target(boardColumn(task))
+			if (!column) {
+				return
+			}
+			const index = this.items().indexOf(item)
+			if (column === 'waiting') {
+				this.pendingWait = { task, index }
+				return
+			}
+			this.moveTo(task, column, index)
+		},
+		async moveTo(task, column, index, waitUntil = null) {
+			try {
+				await this.$store.dispatch('moveTaskToBoardColumn', { task, column, waitUntil })
+			} catch (error) {
+				console.error(error)
+				showError(tbt('Could not move the task.'))
+			}
+			this.refocus(task.key, index)
+		},
+		confirmWait(date) {
+			const { task, index } = this.pendingWait
+			this.pendingWait = null
+			this.moveTo(task, 'waiting', index, date)
+		},
+		cancelWait() {
+			const { task, index } = this.pendingWait
+			this.pendingWait = null
+			this.refocus(task.key, index)
+		},
+		/**
+		 * Moves the focused card up or down in its column (manual board order only)
+		 *
+		 * @param {Element} item The focused card
+		 * @param {number} step +1 (down) or -1 (up)
+		 */
+		reorder(item, step) {
+			const list = item.closest('.tb-board__cards')
+			if (!list) {
+				return
+			}
+			const viewKey = viewKeyForRoute(this.$route)
+			const manual = !!viewKey && this.$store.getters.tbView(viewKey).boardOrder === 'manual'
+			if (!manual || !MANUAL_COLUMNS.includes(list.dataset.column)) {
+				showInfo(tbt('Cards can only be moved up or down here with the manual order of the board.'))
+				return
+			}
+			const tasks = this.cards(list).map(card => this.findTask(card.dataset.taskKey)).filter(Boolean)
+			const task = tasks.find(other => other.key === item.dataset.taskKey)
+			const index = tasks.indexOf(task) + step
+			if (!task || isTaskReadOnly(task) || index < 0 || index >= tasks.length) {
+				return
+			}
+			for (const change of manualOrderChanges(tasks, task, index)) {
+				if (!isTaskReadOnly(change.task)) {
+					this.$store.dispatch('setSortOrder', change)
+				}
+			}
+			this.refocus(task.key, this.items().indexOf(item) + step)
+		},
 		onKeydown(event) {
-			if (this.helpOpen || shortcutsBlocked(event)) {
+			if (this.helpOpen || this.pendingWait || shortcutsBlocked(event)) {
 				return
 			}
 			const item = event.target?.closest?.(TASK_SELECTOR) || null
@@ -118,10 +258,59 @@ export default {
 			}
 			// Arrow keys only move between tasks when no other element has the focus
 			const free = onTask || event.target === document.body || event.target === document.documentElement
-			if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && !free) {
+			if (event.key.startsWith('Arrow') && !free) {
 				return
 			}
+			// The focused task, otherwise the open one
+			const currentItem = () => item && onTask
+				? item
+				: this.items().find(element => element.matches('.task-item__body--active, .tb-card--active, .tb-table__row--active')) || null
 			switch (action) {
+			case 'columnLeft':
+			case 'columnRight':
+				if (this.focusColumn(currentItem(), action === 'columnRight' ? 1 : -1)) {
+					event.preventDefault()
+				}
+				break
+			case 'previousLane':
+			case 'nextLane':
+				if (this.focusLane(currentItem(), action === 'nextLane' ? 1 : -1)) {
+					event.preventDefault()
+				}
+				break
+			case 'first':
+			case 'last': {
+				// On a board within the column, otherwise in the whole list
+				const list = currentItem()?.closest('.tb-board__cards')
+				const items = list ? this.cards(list) : this.items()
+				if (items.length) {
+					event.preventDefault()
+					this.focusItem(items[action === 'first' ? 0 : items.length - 1])
+				}
+				break
+			}
+			case 'moveLeft':
+			case 'moveRight':
+				event.preventDefault()
+				this.moveTask(item, column => neighbourColumn(column, action === 'moveRight' ? 1 : -1))
+				break
+			case 'startStop':
+				event.preventDefault()
+				this.moveTask(item, startStopColumn)
+				break
+			case 'reorderUp':
+			case 'reorderDown':
+				event.preventDefault()
+				this.reorder(item, action === 'reorderDown' ? 1 : -1)
+				break
+			case 'view': {
+				const key = viewKeyForRoute(this.$route)
+				if (key) {
+					event.preventDefault()
+					this.$store.dispatch('setTbView', { key, patch: { mode: viewModeForKey(event.key) } })
+				}
+				break
+			}
 			case 'newTask': {
 				const input = document.querySelector('.header__input input')
 				if (input) {
@@ -136,9 +325,7 @@ export default {
 				if (!items.length) {
 					return
 				}
-				const current = item && onTask
-					? item
-					: items.find(element => element.matches('.task-item__body--active, .tb-card--active, .tb-table__row--active')) || null
+				const current = currentItem()
 				const index = moveIndex(current ? items.indexOf(current) : -1, items.length, action === 'next' ? 1 : -1)
 				event.preventDefault()
 				this.focusItem(items[index])
