@@ -107,6 +107,20 @@ describe('shortcuts', () => {
 		expect(nextFilled([], -1, 1)).toBe(-1)
 	})
 
+	it('maps the task actions', () => {
+		for (const [value, action] of [['o', 'open'], ['m', 'moveList'], ['d', 'due'], [';', 'actions'], ['Backspace', 'delete'], ['Delete', 'delete']]) {
+			expect(shortcutAction(key(value))).toBe(null)
+			expect(shortcutAction(key(value), { onTask: true })).toBe(action)
+		}
+		expect(shortcutAction(key('e'))).toBe('rename')
+		expect(shortcutAction(key('a'))).toBe('add')
+		expect(shortcutAction(key('z'))).toBe('zoom')
+		expect(shortcutAction(key('T', { shiftKey: true }))).toBe('today')
+		expect(shortcutAction(key('W', { shiftKey: true }))).toBe('week')
+		expect(shortcutAction(key('t'))).toBe(null)
+		expect(shortcutAction(key('w'))).toBe(null)
+	})
+
 	it('lists every key once in the overview', () => {
 		const keys = SHORTCUTS.flatMap(entry => entry.keys)
 		expect(new Set(keys).size).toBe(keys.length)

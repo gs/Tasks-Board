@@ -30,6 +30,19 @@ Keyboard shortcuts for lists and boards, "?" shows the overview.
 			{{ tbt('Shortcuts do not apply while you type in a field or a menu is open.') }}
 		</p>
 	</NcDialog>
+	<NcDialog v-if="pendingDelete"
+		:name="tbt('Delete the task')"
+		:open="true"
+		size="small"
+		:buttons="deleteButtons"
+		@update:open="cancelDelete">
+		<p class="tb-shortcuts__task">
+			{{ pendingDelete.task.summary }}
+		</p>
+		<p v-if="pendingDelete.subtasks" class="tb-shortcuts__hint">
+			{{ tbt('Its subtasks ({count}) are deleted as well.', { count: pendingDelete.subtasks }) }}
+		</p>
+	</NcDialog>
 	<TbWaitDialog v-if="pendingWait"
 		:task="pendingWait.task"
 		@confirm="confirmWait"
@@ -69,17 +82,28 @@ export default {
 	data() {
 		return {
 			pendingWait: null,
+			pendingDelete: null,
 			helpOpen: false,
 			shortcuts: SHORTCUTS,
 		}
 	},
+	computed: {
+		deleteButtons() {
+			return [
+				{ label: tbt('Cancel'), callback: () => this.cancelDelete() },
+				{ label: tbt('Delete'), variant: 'error', callback: () => this.confirmDelete() },
+			]
+		},
+	},
 	mounted() {
 		window.addEventListener('keydown', this.onKeydown)
 		subscribe('tasks_board:show-shortcuts', this.showHelp)
+		subscribe('tb:focus-task', this.onFocusRequest)
 	},
 	beforeUnmount() {
 		window.removeEventListener('keydown', this.onKeydown)
 		unsubscribe('tasks_board:show-shortcuts', this.showHelp)
+		unsubscribe('tb:focus-task', this.onFocusRequest)
 	},
 	methods: {
 		tbt,
@@ -246,8 +270,72 @@ export default {
 			}
 			this.refocus(task.key, this.items().indexOf(item) + step)
 		},
+		onFocusRequest(key) {
+			this.refocus(key, 0)
+		},
+		/**
+		 * Opens a menu of the selection bar for the focused task, or for the selection it belongs to
+		 *
+		 * @param {Element} item The focused row or card
+		 * @param {string} menu due, move or bar (the bar itself)
+		 */
+		selectionMenu(item, menu) {
+			const key = item.dataset.taskKey
+			const task = this.findTask(key)
+			if (!task || isTaskReadOnly(task)) {
+				return
+			}
+			// A task selected just for this is released again afterwards
+			const own = !this.$store.getters.isTbSelected(key)
+			if (own) {
+				this.$store.commit('setTbSelection', [key])
+			}
+			emit('tb:selection-menu', { menu, key, release: own && menu !== 'bar' })
+		},
+		/**
+		 * Starts a new task in the column of the focused card, otherwise in the input of the header
+		 *
+		 * @param {Element|null} item The current row or card
+		 * @return {boolean} Whether there is a place to add a task
+		 */
+		addHere(item) {
+			const target = item?.closest('.tb-board__column')?.querySelector('.tb-board__add-button')
+				|| document.querySelector('.header__input input')
+			if (target?.matches('input')) {
+				target.focus()
+			} else {
+				target?.click()
+			}
+			return !!target
+		},
+		askDelete(item) {
+			const task = this.findTask(item.dataset.taskKey)
+			if (!task || isTaskReadOnly(task)) {
+				return
+			}
+			this.pendingDelete = { task, index: this.items().indexOf(item), subtasks: Object.keys(task.subTasks || {}).length }
+		},
+		async confirmDelete() {
+			const { task, index } = this.pendingDelete
+			this.pendingDelete = null
+			try {
+				await this.$store.dispatch('deleteTask', { task, dav: true })
+			} catch (error) {
+				console.error(error)
+				showError(tbt('Could not delete the task.'))
+			}
+			this.refocus(task.key, index)
+		},
+		cancelDelete() {
+			if (!this.pendingDelete) {
+				return
+			}
+			const { task, index } = this.pendingDelete
+			this.pendingDelete = null
+			this.refocus(task.key, index)
+		},
 		onKeydown(event) {
-			if (this.helpOpen || this.pendingWait || shortcutsBlocked(event)) {
+			if (this.helpOpen || this.pendingWait || this.pendingDelete || shortcutsBlocked(event)) {
 				return
 			}
 			const item = event.target?.closest?.(TASK_SELECTOR) || null
@@ -303,6 +391,38 @@ export default {
 				event.preventDefault()
 				this.reorder(item, action === 'reorderDown' ? 1 : -1)
 				break
+			case 'add':
+				if (this.addHere(currentItem())) {
+					event.preventDefault()
+				}
+				break
+			case 'due':
+				event.preventDefault()
+				this.selectionMenu(item, 'due')
+				break
+			case 'moveList':
+				event.preventDefault()
+				this.selectionMenu(item, 'move')
+				break
+			case 'actions':
+				event.preventDefault()
+				this.selectionMenu(item, 'bar')
+				break
+			case 'delete':
+				event.preventDefault()
+				this.askDelete(item)
+				break
+			case 'zoom': {
+				// The board decides: it restores a widened column, otherwise widens this one
+				const list = currentItem()?.closest('.tb-board__cards')
+				emit('tb:zoom-column', list ? { lane: list.dataset.lane, column: list.dataset.column } : null)
+				break
+			}
+			case 'today':
+			case 'week':
+				event.preventDefault()
+				this.$router.push({ name: 'collections', params: { collectionId: action } })
+				break
 			case 'view': {
 				const key = viewKeyForRoute(this.$route)
 				if (key) {
@@ -333,7 +453,7 @@ export default {
 			}
 			case 'open':
 				// Board cards open themselves on Enter
-				if (!item.classList.contains('tb-card')) {
+				if (event.key !== 'Enter' || !item.classList.contains('tb-card')) {
 					event.preventDefault()
 					item.click()
 				}
@@ -426,6 +546,10 @@ export default {
 		font-size: 12px;
 		font-weight: 600;
 		text-align: center;
+	}
+
+	&__task {
+		font-weight: 600;
 	}
 
 	&__hint {

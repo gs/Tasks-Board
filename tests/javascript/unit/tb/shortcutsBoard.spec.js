@@ -1,6 +1,7 @@
 import TbShortcuts from '../../../../src/tb/components/TbShortcuts.vue'
 import { makeCalendar, makeTask } from './helpers.js'
 
+import { subscribe, unsubscribe } from '@nextcloud/event-bus'
 import { mount } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -21,6 +22,8 @@ function boardMarkup(rows) {
 
 describe('shortcuts on the board', () => {
 	let wrapper
+	let selected
+	let router
 
 	/**
 	 * @param {object} calendar The list
@@ -30,14 +33,16 @@ describe('shortcuts on the board', () => {
 	 */
 	function setup(calendar, rows, view = { mode: 'board', boardOrder: 'sort' }) {
 		document.body.innerHTML = boardMarkup(rows)
+		selected = []
+		router = { push: vi.fn() }
 		const store = {
-			getters: { getSortedCalendars: [calendar], tbView: () => view },
+			getters: { getSortedCalendars: [calendar], tbView: () => view, isTbSelected: key => selected.includes(key) },
 			dispatch: vi.fn(() => Promise.resolve()),
 			commit: vi.fn(),
 		}
 		wrapper = mount(TbShortcuts, {
 			global: {
-				mocks: { $store: store, $route: { params: { calendarId: calendar.id } } },
+				mocks: { $store: store, $route: { params: { calendarId: calendar.id } }, $router: router },
 				stubs: { NcDialog: true, TbWaitDialog: true },
 			},
 		})
@@ -156,5 +161,93 @@ describe('shortcuts on the board', () => {
 		const store = setup(calendar, [{ open: [task] }])
 		press(task, '3')
 		expect(store.dispatch).toHaveBeenCalledWith('setTbView', { key: 'calendar:cal', patch: { mode: 'table' } })
+	})
+
+	it('asks before it deletes a task', async () => {
+		const calendar = makeCalendar('cal')
+		const task = makeTask(calendar, { uid: 'a' })
+		const store = setup(calendar, [{ open: [task] }])
+		press(task, 'Backspace')
+		expect(store.dispatch).not.toHaveBeenCalled()
+		expect(wrapper.vm.pendingDelete.task.key).toBe(task.key)
+		wrapper.vm.cancelDelete()
+		expect(store.dispatch).not.toHaveBeenCalled()
+		press(task, 'Delete')
+		await wrapper.vm.confirmDelete()
+		const [action, data] = store.dispatch.mock.calls[0]
+		expect(action).toBe('deleteTask')
+		expect(data.task.key).toBe(task.key)
+		expect(wrapper.vm.pendingDelete).toBe(null)
+	})
+
+	it('does not offer to delete or change a read-only task', () => {
+		const calendar = makeCalendar('cal', { readOnly: true })
+		const task = makeTask(calendar, { uid: 'a' })
+		const store = setup(calendar, [{ open: [task] }])
+		const requests = []
+		const listener = request => requests.push(request)
+		subscribe('tb:selection-menu', listener)
+		press(task, 'Backspace')
+		press(task, 'd')
+		press(task, 'm')
+		unsubscribe('tb:selection-menu', listener)
+		expect(wrapper.vm.pendingDelete).toBe(null)
+		expect(requests).toEqual([])
+		expect(store.commit).not.toHaveBeenCalled()
+	})
+
+	it('opens the menus of the selection bar for the focused task', () => {
+		const calendar = makeCalendar('cal')
+		const [a, b] = ['a', 'b'].map(uid => makeTask(calendar, { uid }))
+		const store = setup(calendar, [{ open: [a, b] }])
+		const requests = []
+		const listener = request => requests.push(request)
+		subscribe('tb:selection-menu', listener)
+		press(a, 'd')
+		expect(store.commit).toHaveBeenCalledWith('setTbSelection', [a.key])
+		// A task of the selection: the action is for all of them, the selection stays
+		selected = [a.key, b.key]
+		store.commit.mockClear()
+		press(a, 'm')
+		press(b, ';')
+		unsubscribe('tb:selection-menu', listener)
+		expect(store.commit).not.toHaveBeenCalled()
+		expect(requests).toEqual([
+			{ menu: 'due', key: a.key, release: true },
+			{ menu: 'move', key: a.key, release: false },
+			{ menu: 'bar', key: b.key, release: false },
+		])
+	})
+
+	it('adds a task in the column of the focused card', () => {
+		const calendar = makeCalendar('cal')
+		const task = makeTask(calendar, { uid: 'a' })
+		setup(calendar, [{ open: [task] }])
+		const list = card(task).parentElement
+		const section = document.createElement('section')
+		section.className = 'tb-board__column'
+		list.replaceWith(section)
+		section.innerHTML = '<button class="tb-board__add-button"></button>'
+		section.append(list)
+		const click = vi.fn()
+		section.querySelector('button').addEventListener('click', click)
+		press(task, 'a')
+		expect(click).toHaveBeenCalledTimes(1)
+	})
+
+	it('asks the board to widen the column and goes to Today and Week', () => {
+		const calendar = makeCalendar('cal')
+		const task = makeTask(calendar, { uid: 'a' })
+		setup(calendar, [{ waiting: [task] }])
+		card(task).parentElement.dataset.lane = 'all'
+		const requests = []
+		const listener = request => requests.push(request)
+		subscribe('tb:zoom-column', listener)
+		press(task, 'z')
+		unsubscribe('tb:zoom-column', listener)
+		expect(requests).toEqual([{ lane: 'all', column: 'waiting' }])
+		press(task, 'T', true)
+		press(task, 'W', true)
+		expect(router.push.mock.calls.map(([to]) => to.params.collectionId)).toEqual(['today', 'week'])
 	})
 })

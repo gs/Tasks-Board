@@ -16,9 +16,10 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 			</h2>
 			<div class="tb-board__columns">
 				<section v-for="column in columns"
+					v-show="!hiddenByZoom(lane, column)"
 					:key="column"
 					class="tb-board__column"
-					:class="'tb-board__column--' + column">
+					:class="['tb-board__column--' + column, { 'tb-board__column--zoomed': isZoomed(lane, column) }]">
 					<header class="tb-board__column-header">
 						<span class="tb-board__dot" />
 						<span class="tb-board__column-title">{{ columnTitle(column) }}</span>
@@ -122,6 +123,7 @@ import TbBoardCard from './TbBoardCard.vue'
 import TbWaitDialog from './TbWaitDialog.vue'
 
 import { showError } from '@nextcloud/dialogs'
+import { subscribe, unsubscribe } from '@nextcloud/event-bus'
 import moment from '@nextcloud/moment'
 import NcButton from '@nextcloud/vue/components/NcButton'
 
@@ -162,6 +164,8 @@ export default {
 	data() {
 		return {
 			pendingWait: null,
+			// Row and column widened with the key Z: { lane, column }
+			zoomed: null,
 			adding: null,
 			addingBusy: false,
 			newSummary: '',
@@ -223,8 +227,28 @@ export default {
 			return this.view.boardOrder === 'manual'
 		},
 	},
+	mounted() {
+		subscribe('tb:zoom-column', this.onZoomRequest)
+	},
+	beforeUnmount() {
+		unsubscribe('tb:zoom-column', this.onZoomRequest)
+	},
 	methods: {
 		tbt,
+		isZoomed(lane, column) {
+			return this.zoomed?.lane === lane.key && this.zoomed.column === column
+		},
+		hiddenByZoom(lane, column) {
+			return this.zoomed?.lane === lane.key && this.zoomed.column !== column
+		},
+		/**
+		 * Key Z: back to all columns, otherwise only the column of the focused card
+		 *
+		 * @param {object|null} place Row and column of the focused card
+		 */
+		onZoomRequest(place) {
+			this.zoomed = this.zoomed ? null : place
+		},
 		laneCount(lane) {
 			return Object.values(lane.columns).reduce((sum, tasks) => sum + tasks.length, 0)
 		},
@@ -605,6 +629,12 @@ export default {
 			--tb-column-color: var(--tb-status-cancelled, #9aa0a6);
 			flex-basis: 200px;
 			max-width: 320px;
+		}
+
+		&--zoomed {
+			flex-basis: 100%;
+			max-width: 960px;
+			margin-inline: auto;
 		}
 	}
 

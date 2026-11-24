@@ -128,7 +128,11 @@ actions for all selected tasks at once.
 				</NcActionButton>
 			</NcActions>
 
-			<NcActions variant="tertiary" :menu-name="tbt('Due')" :disabled="busy">
+			<NcActions variant="tertiary"
+				:menu-name="tbt('Due')"
+				:disabled="busy"
+				:open="openMenu === 'due'"
+				@update:open="onMenuToggle('due', $event)">
 				<template #icon>
 					<CalendarEnd :size="20" />
 				</template>
@@ -146,7 +150,9 @@ actions for all selected tasks at once.
 			<NcActions v-if="calendars.length > 1"
 				variant="tertiary"
 				:menu-name="tbt('Move')"
-				:disabled="busy">
+				:disabled="busy"
+				:open="openMenu === 'move'"
+				@update:open="onMenuToggle('move', $event)">
 				<template #icon>
 					<FolderMoveOutline :size="20" />
 				</template>
@@ -189,7 +195,8 @@ import { isWaitingTagName } from '../waiting.js'
 import TbAvatar from './TbAvatar.vue'
 import TbWaitDialog from './TbWaitDialog.vue'
 
-import { showError, showSuccess } from '@nextcloud/dialogs'
+import { showError, showInfo, showSuccess } from '@nextcloud/dialogs'
+import { emit, subscribe, unsubscribe } from '@nextcloud/event-bus'
 import moment from '@nextcloud/moment'
 import NcActionButton from '@nextcloud/vue/components/NcActionButton'
 import NcActionCaption from '@nextcloud/vue/components/NcActionCaption'
@@ -241,6 +248,10 @@ export default {
 			newTag: '',
 			waitDialog: false,
 			position: {},
+			// Opened with the keyboard (see TbShortcuts)
+			openMenu: null,
+			releaseAfter: false,
+			returnKey: null,
 		}
 	},
 	computed: {
@@ -317,6 +328,13 @@ export default {
 				this.$nextTick(this.place)
 			}
 		},
+		count(count) {
+			// The keyboard goes back to the task the bar was opened from
+			if (!count && this.returnKey) {
+				emit('tb:focus-task', this.returnKey)
+				this.returnKey = null
+			}
+		},
 	},
 	mounted() {
 		// Capture phase: Nextcloud handles Esc on the way up already
@@ -328,8 +346,10 @@ export default {
 			this.observer.observe(content)
 		}
 		this.place()
+		subscribe('tb:selection-menu', this.onShortcut)
 	},
 	beforeUnmount() {
+		unsubscribe('tb:selection-menu', this.onShortcut)
 		window.removeEventListener('keydown', this.onKeydown, true)
 		window.removeEventListener('resize', this.place)
 		this.observer?.disconnect()
@@ -361,6 +381,51 @@ export default {
 		clear() {
 			this.$store.commit('clearTbSelection')
 		},
+		/**
+		 * A shortcut asks for a menu of the bar (or the bar itself)
+		 *
+		 * @param {object} request Destructuring object
+		 * @param {string} request.menu due, move or bar
+		 * @param {string} request.key Key of the task that has the focus
+		 * @param {boolean} request.release Whether the selection was made just for this
+		 */
+		async onShortcut({ menu, key, release }) {
+			this.returnKey = key
+			this.releaseAfter = release
+			// The bar is only rendered once something is selected
+			await this.$nextTick()
+			if (menu === 'bar') {
+				this.$el.querySelector?.('button')?.focus()
+				return
+			}
+			if (menu === 'move' && this.calendars.length < 2) {
+				showInfo(tbt('There is no other list to move the task to.'))
+				this.release()
+				return
+			}
+			this.openMenu = menu
+		},
+		onMenuToggle(menu, open) {
+			if (open) {
+				this.openMenu = menu
+				return
+			}
+			if (this.openMenu === menu) {
+				this.openMenu = null
+			}
+			// Closed without a choice: a running action releases the selection itself
+			setTimeout(() => {
+				if (!this.busy) {
+					this.release()
+				}
+			})
+		},
+		release() {
+			if (this.releaseAfter) {
+				this.releaseAfter = false
+				this.clear()
+			}
+		},
 		loadPeople() {
 			const seen = new Set()
 			for (const task of this.tasks) {
@@ -383,6 +448,7 @@ export default {
 				showError(tbt('Not all tasks could be changed.'))
 			} finally {
 				this.busy = false
+				this.release()
 			}
 		},
 		setColumn(column) {

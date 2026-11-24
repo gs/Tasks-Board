@@ -29,7 +29,8 @@ const VIEW_KEYS = { 1: 'list', 2: 'board', 3: 'table', 4: 'timeline' }
  * @param {object} context Destructuring object
  * @param {boolean} context.onTask Whether a task row/card has the focus
  * @return {string|null} newTask, next, previous, first, last, columnLeft, columnRight, previousLane, nextLane,
- * reorderUp, reorderDown, moveLeft, moveRight, startStop, view, open, toggle, select, rename, board, help or null
+ * reorderUp, reorderDown, moveLeft, moveRight, startStop, view, open, toggle, select, rename, board, help, add,
+ * moveList, due, actions, delete, zoom, today, week or null
  */
 export function shortcutAction(event, { onTask = false } = {}) {
 	if (event.ctrlKey || event.metaKey || event.altKey) {
@@ -91,7 +92,27 @@ export function shortcutAction(event, { onTask = false } = {}) {
 	case '4':
 		return 'view'
 	case 'Enter':
+	case 'o':
 		return onTask ? 'open' : null
+	case 'e':
+		return 'rename'
+	case 'a':
+		return 'add'
+	case 'm':
+		return onTask ? 'moveList' : null
+	case 'd':
+		return onTask ? 'due' : null
+	case ';':
+		return onTask ? 'actions' : null
+	case 'Backspace':
+	case 'Delete':
+		return onTask ? 'delete' : null
+	case 'z':
+		return 'zoom'
+	case 'T':
+		return 'today'
+	case 'W':
+		return 'week'
 	case ' ':
 		return onTask ? 'toggle' : null
 	case 'x':
@@ -230,10 +251,17 @@ export const SHORTCUTS = [
 	{ keys: ['Shift+↑', 'Shift+K'], label: 'Move the card up (manual order)' },
 	{ keys: ['Shift+↓', 'Shift+J'], label: 'Move the card down (manual order)' },
 	{ keys: ['S'], label: 'Start the task or put it back to open' },
-	{ keys: ['Enter'], label: 'Open the task' },
+	{ keys: ['Enter', 'O'], label: 'Open the task' },
 	{ keys: ['Space'], label: 'Complete / reopen the task' },
 	{ keys: ['X'], label: 'Select the task' },
-	{ keys: ['F2'], label: 'Rename the task' },
+	{ keys: ['F2', 'E'], label: 'Rename the task' },
+	{ keys: ['A'], label: 'Add a task to this column or list' },
+	{ keys: ['D'], label: 'Set the due date' },
+	{ keys: ['M'], label: 'Move to another list' },
+	{ keys: [';'], label: 'Actions for the task' },
+	{ keys: ['Backspace'], label: 'Delete the task' },
+	{ keys: ['Z'], label: 'Widen the column of the board, again to go back' },
+	{ keys: ['Shift+T', 'Shift+W'], label: 'Go to Today or Week' },
 	{ keys: ['Esc'], label: 'Clear the selection' },
 	{ keys: ['B'], label: 'Switch between list, board, table and timeline' },
 	{ keys: ['1', '2', '3', '4'], label: 'Show the list, board, table or timeline' },
