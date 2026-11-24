@@ -4,6 +4,7 @@
 - More keyboard shortcuts, all listed under `?`: `H`/`L` and `←`/`→` change the column on the board, `[`/`]` the row, `G`/`Shift+G` jump to the first or last task. With `Shift`, `H`/`L` or `←`/`→` move the task one column (status) to the left or right, `J`/`K` or `↓`/`↑` move a card up or down with the manual order. `S` starts a task or puts it back to open, `1` to `4` show the list, board, table or timeline
 - Task actions by key: `O` opens and `E` renames the task (like `Enter` and `F2`), `A` adds a task in the column of the focused card, `D` opens the due dates and `M` the lists to move to, `;` puts the keyboard into the bar with all actions, `Backspace` deletes after a confirmation. `Z` widens the column of the focused card and brings the others back, `Shift+T` and `Shift+W` go to Today and Week
 - `J` and `K` also move through the entries of an open menu
+- Tasks in the Calendar app without leaving it: a click on a task opens a dialog to rename it, change its status, due date and notes or delete it; the button "+ Task" (key `A`) adds a task, due on the day the calendar shows. The calendar loads again after a change. Ctrl+click still opens the task in Tasks Board
 
 ### Changed
 - The card that has the keyboard focus on the board is clearly marked

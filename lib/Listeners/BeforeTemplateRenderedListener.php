@@ -64,9 +64,10 @@ class BeforeTemplateRenderedListener implements IEventListener {
 			Util::addStyle(Application::APP_ID, 'tasks-icon');
 		}
 
-		// Tasks Board: a click on a task in the Calendar app opens it in Tasks Board
+		// Tasks Board: a click on a task in the Calendar app opens it in a dialog, tasks can be added there
 		if (strpos($pathInfo, '/apps/calendar') === 0 && $this->opensFromCalendar()) {
 			Util::addScript(Application::APP_ID, Application::APP_ID . '-calendar');
+			Util::addStyle(Application::APP_ID, Application::APP_ID . '-calendar');
 		}
 	}
 
