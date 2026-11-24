@@ -1,4 +1,4 @@
-import { SHORTCUTS, moveIndex, neighbourColumn, nextFilled, shortcutAction, shortcutsBlocked, startStopColumn, viewModeForKey } from '../../../../src/tb/shortcuts.js'
+import { SHORTCUTS, arrowsFree, menuArrowKey, moveIndex, neighbourColumn, nextFilled, shortcutAction, shortcutsBlocked, startStopColumn, viewModeForKey } from '../../../../src/tb/shortcuts.js'
 
 import { describe, expect, it } from 'vitest'
 
@@ -119,6 +119,30 @@ describe('shortcuts', () => {
 		expect(shortcutAction(key('W', { shiftKey: true }))).toBe('week')
 		expect(shortcutAction(key('t'))).toBe(null)
 		expect(shortcutAction(key('w'))).toBe(null)
+	})
+
+	it('leaves the arrow keys to the sidebar, tabs and sliders only', () => {
+		document.body.innerHTML = '<a id="nav" href="#"></a><button id="view"></button>'
+			+ '<aside class="app-sidebar"><button id="side"></button></aside><div role="tablist"><button id="tab" role="tab"></button></div>'
+		const free = id => arrowsFree(document.getElementById(id))
+		expect(arrowsFree(document.body)).toBe(true)
+		expect(free('nav')).toBe(true)
+		expect(free('view')).toBe(true)
+		expect(free('side')).toBe(false)
+		expect(free('tab')).toBe(false)
+		document.body.innerHTML = ''
+	})
+
+	it('turns J and K into arrow keys in an open menu, not in its input', () => {
+		document.body.innerHTML = '<div class="v-popper__popper"><ul role="menu"><li><button id="entry"></button></li><li><input id="field"></li></ul></div><div id="task"></div>'
+		const on = id => document.getElementById(id)
+		expect(menuArrowKey({ ...key('j'), target: on('entry') })).toBe('ArrowDown')
+		expect(menuArrowKey({ ...key('k'), target: on('entry') })).toBe('ArrowUp')
+		expect(menuArrowKey({ ...key('x'), target: on('entry') })).toBe(null)
+		expect(menuArrowKey({ ...key('j', { ctrlKey: true }), target: on('entry') })).toBe(null)
+		expect(menuArrowKey({ ...key('j'), target: on('field') })).toBe(null)
+		expect(menuArrowKey({ ...key('j'), target: on('task') })).toBe(null)
+		document.body.innerHTML = ''
 	})
 
 	it('lists every key once in the overview', () => {

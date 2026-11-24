@@ -22,6 +22,37 @@ const REPEATING_KEYS = ['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'j', 
 /** The view each number key switches to */
 const VIEW_KEYS = { 1: 'list', 2: 'board', 3: 'table', 4: 'timeline' }
 
+/** Where the arrow keys already have a meaning of their own */
+const ARROW_OWNER_SELECTOR = '.app-sidebar, #app-sidebar-vue, select, video, audio, [role=tablist], [role=tab], [role=radiogroup], [role=radio], [role=slider], [role=tree], [role=grid], [role=combobox]'
+
+/**
+ * Whether the arrow keys may move between tasks: not where they do something else
+ * (the sidebar, tabs, sliders …). A focused button or link does not use them.
+ *
+ * @param {EventTarget} target The element that has the focus
+ * @return {boolean}
+ */
+export function arrowsFree(target) {
+	return !target?.closest?.(ARROW_OWNER_SELECTOR)
+}
+
+/**
+ * The arrow key J or K stands for in an open menu, so its entries can be reached like tasks
+ *
+ * @param {KeyboardEvent} event The event
+ * @return {string|null} ArrowDown, ArrowUp or null
+ */
+export function menuArrowKey(event) {
+	if (event.ctrlKey || event.metaKey || event.altKey || event.isComposing) {
+		return null
+	}
+	const target = event.target
+	if (!target?.closest?.('.v-popper__popper') || target.closest('input, textarea, select, [contenteditable=""], [contenteditable=true]')) {
+		return null
+	}
+	return { j: 'ArrowDown', k: 'ArrowUp' }[event.key] || null
+}
+
 /**
  * Maps a key event to a shortcut action
  *
@@ -239,8 +270,8 @@ export function moveIndex(current, count, step) {
  */
 export const SHORTCUTS = [
 	{ keys: ['N'], label: 'New task' },
-	{ keys: ['↓', 'J'], label: 'Next task' },
-	{ keys: ['↑', 'K'], label: 'Previous task' },
+	{ keys: ['↓', 'J'], label: 'Next task, or entry of an open menu' },
+	{ keys: ['↑', 'K'], label: 'Previous task, or entry of an open menu' },
 	{ keys: ['G'], label: 'First task' },
 	{ keys: ['Shift+G'], label: 'Last task' },
 	{ keys: ['←', 'H'], label: 'Column to the left (board)' },

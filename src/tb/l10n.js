@@ -274,6 +274,8 @@ const translations = {
 		'New task': 'Neue Aufgabe',
 		'Next task': 'Nächste Aufgabe',
 		'First task': 'Erste Aufgabe',
+		'Next task, or entry of an open menu': 'Nächste Aufgabe oder nächster Eintrag eines offenen Menüs',
+		'Previous task, or entry of an open menu': 'Vorherige Aufgabe oder vorheriger Eintrag eines offenen Menüs',
 		'Add a task to this column or list': 'Aufgabe in dieser Spalte oder Liste anlegen',
 		'Set the due date': 'Fälligkeit setzen',
 		'Move to another list': 'In eine andere Liste verschieben',

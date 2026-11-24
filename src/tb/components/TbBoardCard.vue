@@ -356,11 +356,18 @@ export default {
 	box-shadow: 0 1px 2px rgba(0, 0, 0, .04);
 	transition: box-shadow 120ms ease, border-color 120ms ease;
 
-	&:hover,
-	&:focus-visible {
+	&:hover {
 		border-color: var(--color-border-dark);
 		box-shadow: 0 2px 8px rgba(0, 0, 0, .08);
-		outline: none;
+	}
+
+	// Keyboard focus (J/K, H/L): the card the keys act on must be easy to find
+	&:focus-visible {
+		outline: 2px solid var(--color-primary-element);
+		outline-offset: -1px;
+		border-color: var(--color-primary-element);
+		background-color: color-mix(in srgb, var(--color-primary-element) 8%, var(--tb-card-bg, var(--color-main-background)));
+		box-shadow: 0 2px 8px rgba(0, 0, 0, .08);
 	}
 
 	&--active,

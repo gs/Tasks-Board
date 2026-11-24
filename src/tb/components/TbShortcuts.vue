@@ -53,6 +53,8 @@ Keyboard shortcuts for lists and boards, "?" shows the overview.
 import { MANUAL_COLUMNS, boardColumn, manualOrderChanges, viewKeyForRoute } from '../board.js'
 import { tbt } from '../l10n.js'
 import {
+	arrowsFree,
+	menuArrowKey,
 	moveIndex,
 	neighbourColumn,
 	nextFilled,
@@ -335,6 +337,13 @@ export default {
 			this.refocus(task.key, index)
 		},
 		onKeydown(event) {
+			// In a menu J and K are the arrow keys, the menu itself moves the focus
+			const arrow = menuArrowKey(event)
+			if (arrow) {
+				event.preventDefault()
+				event.target.dispatchEvent(new KeyboardEvent('keydown', { key: arrow, code: arrow, bubbles: true, cancelable: true }))
+				return
+			}
 			if (this.helpOpen || this.pendingWait || this.pendingDelete || shortcutsBlocked(event)) {
 				return
 			}
@@ -344,9 +353,7 @@ export default {
 			if (!action) {
 				return
 			}
-			// Arrow keys only move between tasks when no other element has the focus
-			const free = onTask || event.target === document.body || event.target === document.documentElement
-			if (event.key.startsWith('Arrow') && !free) {
+			if (event.key.startsWith('Arrow') && !onTask && !arrowsFree(event.target)) {
 				return
 			}
 			// The focused task, otherwise the open one
