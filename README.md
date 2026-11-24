@@ -83,7 +83,7 @@ Everything the Tasks app does (lists, subtasks, smart collections, start and due
 
 ## Try it online
 
-The [Nextcloud Playground](https://ateeducacion.github.io/nextcloud-playground/?blueprint-url=https://raw.githubusercontent.com/its-sven/Tasks-Board/tasks-board/docs/playground/blueprint.json) starts a complete Nextcloud with the latest release of Tasks Board right in your browser, with nothing to install. It runs entirely on your computer (WebAssembly): nothing is stored on a server, and closing the tab starts over. You are signed in as `admin`. Things that need a real server, such as instant updates from other people or notifications from background jobs, cannot be tried there. The setup is in [`docs/playground/blueprint.json`](docs/playground/blueprint.json).
+The [Nextcloud Playground](https://ateeducacion.github.io/nextcloud-playground/?blueprint-url=https://raw.githubusercontent.com/its-sven/Tasks-Board/tasks-board/docs/playground/blueprint.json) starts a complete Nextcloud with the latest release of Tasks Board right in your browser, with nothing to install. It runs entirely on your computer (WebAssembly): nothing is stored on a server, and closing the tab starts over. You are signed in as `admin` and start with sample lists (all dates relative to today) whose tasks are assigned to you and three more people. Things that need a real server, such as instant updates from other people or notifications from background jobs, cannot be tried there. The setup is in [`docs/playground/blueprint.json`](docs/playground/blueprint.json).
 
 ## Installation
 
@@ -96,6 +96,8 @@ Search for **Tasks Board** under »Apps« in your Nextcloud, or see [apps.nextcl
 1. Download `tasks_board.tar.gz` from the [latest release](https://github.com/its-sven/Tasks-Board/releases/latest).
 2. Extract it into the `apps` (or `custom_apps`) folder of your Nextcloud, so that the folder is called `tasks_board`.
 3. Enable it under »Apps« or with `php occ app:enable tasks_board`.
+
+To look around with sample data, `php occ tasks_board:demo <user> [--people=emma,liam]` creates four sample lists with tasks for that user (dates relative to today, tasks assigned to up to three more existing users). It never changes existing lists.
 
 Requirements: Nextcloud 31 or newer and PHP 8.2 or newer.
 

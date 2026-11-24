@@ -1,3 +1,9 @@
+## 1.6.2 - 2026-11-24
+
+### Added
+- `occ tasks_board:demo <user> [--people=a,b,c]` creates sample lists with tasks to try Tasks Board: a project with subtasks and dependencies, a website relaunch, office tasks with a follow-up, and templates. All dates are relative to today, tasks are assigned to the given people. Existing lists are never changed: if one of the sample lists exists already, nothing is created
+- The [Nextcloud Playground](https://ateeducacion.github.io/nextcloud-playground/?blueprint-url=https://raw.githubusercontent.com/its-sven/Tasks-Board/tasks-board/docs/playground/blueprint.json) opens with these sample lists and three more people
+
 ## 1.6.1 - 2026-11-23
 
 ### Fixed

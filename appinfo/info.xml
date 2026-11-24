@@ -47,7 +47,7 @@ Zusätzlich zur gewohnten Aufgabenliste gibt es:
 Aufgaben lassen sich wie mit der Tasks-App mit jedem CalDAV-Programm synchronisieren (Thunderbird, Evolution, KDE Kontact, DAVx⁵ …).
 
 Tasks Board ist ein unabhängiges Projekt und gehört nicht zur Nextcloud GmbH.]]></description>
-    <version>1.6.1</version>
+    <version>1.6.2</version>
     <licence>AGPL-3.0-or-later</licence>
     <author>Sven Würth</author>
     <author mail="raimund.schluessler@mailbox.org" homepage="https://github.com/nextcloud/tasks">Raimund Schlüßler (Nextcloud Tasks)</author>
@@ -76,6 +76,9 @@ Tasks Board ist ein unabhängiges Projekt und gehört nicht zur Nextcloud GmbH.]
     <background-jobs>
         <job>OCA\TasksBoard\BackgroundJob\FollowUpJob</job>
     </background-jobs>
+    <commands>
+        <command>OCA\TasksBoard\Command\Demo</command>
+    </commands>
     <navigations>
         <navigation>
             <id>tasks_board</id>

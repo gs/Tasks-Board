@@ -3,7 +3,7 @@
 	"meta": {
 		"title": "Tasks Board Playground",
 		"author": "Sven Würth",
-		"description": "A fresh Nextcloud in the browser with the latest release of Tasks Board installed. Nothing is stored on a server; closing the tab starts over."
+		"description": "A fresh Nextcloud in the browser with the latest release of Tasks Board and sample lists (dates relative to today). Nothing is stored on a server; closing the tab starts over."
 	},
 	"landingPage": "/index.php/apps/tasks_board/",
 	"siteOptions": {
@@ -18,10 +18,24 @@
 	},
 	"steps": [
 		{ "step": "disableApp", "app": "firstrunwizard" },
+		{ "step": "setConfig", "app": "core", "key": "whatsNewEnabled", "value": "no" },
 		{
 			"step": "installApp",
 			"appId": "tasks_board",
 			"url": "https://github-proxy.exelearning.dev/?repo=its-sven/Tasks-Board&release=latest&asset=tasks_board.tar.gz"
+		},
+		{ "step": "createUser", "uid": "emma", "password": "Playground-Emma-2026", "displayName": "Emma Clark", "email": "emma@example.com" },
+		{ "step": "createUser", "uid": "liam", "password": "Playground-Liam-2026", "displayName": "Liam Walker", "email": "liam@example.com" },
+		{ "step": "createUser", "uid": "sofia", "password": "Playground-Sofia-2026", "displayName": "Sofia Rossi", "email": "sofia@example.com" },
+		{
+			"step": "runOcc",
+			"comment": "Sample lists and tasks with all dates relative to today (Tasks Board 1.6.2 and newer).",
+			"args": ["tasks_board:demo", "admin", "--people=emma,liam,sofia"]
+		},
+		{
+			"step": "runOcc",
+			"comment": "Open on the board.",
+			"args": ["user:setting", "admin", "tasks_board", "various_tbViews", "{\"*\":{\"mode\":\"board\"}}"]
 		}
 	]
 }
