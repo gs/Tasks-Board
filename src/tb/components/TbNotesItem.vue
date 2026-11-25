@@ -16,7 +16,7 @@ The note is saved exactly as typed (plain markdown).
 			:class="{ 'tb-notes__viewer--empty': !hasContent, 'tb-notes__viewer--editable': !readOnly }"
 			:title="readOnly ? '' : tbt('Click to edit')"
 			@click="onViewerClick">
-			<!-- eslint-disable-next-line vue/no-v-html -- sanitized by DOMPurify in renderNote() -->
+			<!-- eslint-disable-next-line vue/no-v-html -- sanitized by DOMPurify in renderNoteView() -->
 			<div v-if="hasContent" v-html="html" />
 			<span v-else>{{ t('tasks', 'Click here to add a note.') }}</span>
 		</div>
@@ -80,7 +80,7 @@ The note is saved exactly as typed (plain markdown).
 				@keydown="onKeydown"
 				@compositionstart="compositing = true"
 				@compositionend="compositing = false" />
-			<!-- eslint-disable-next-line vue/no-v-html -- sanitized by DOMPurify in renderNote() -->
+			<!-- eslint-disable-next-line vue/no-v-html -- sanitized by DOMPurify in renderNoteView() -->
 			<div v-if="preview" class="tb-notes__preview tb-note" v-html="previewHtml" />
 			<p class="tb-notes__hint">
 				{{ tbt('Markdown · Ctrl+Enter or click outside saves') }}
@@ -90,7 +90,8 @@ The note is saved exactly as typed (plain markdown).
 </template>
 
 <script>
-import { applyFormat, continueList, MAX_RENDER_SIZE, renderNote, toggleTaskItem } from '../markdown.js'
+import { applyFormat, continueList, renderNoteView, toggleTaskItem } from '../markdown.js'
+import '../note.scss'
 import { tbt } from '../l10n.js'
 
 import { translate as t } from '@nextcloud/l10n'
@@ -115,14 +116,6 @@ import FormatStrikethroughVariant from 'vue-material-design-icons/FormatStriketh
 import LinkVariant from 'vue-material-design-icons/LinkVariant.vue'
 import Minus from 'vue-material-design-icons/Minus.vue'
 import TableLarge from 'vue-material-design-icons/TableLarge.vue'
-
-/**
- * @param {string} text Plain text
- * @return {string} HTML-escaped text
- */
-function escapeHtml(text) {
-	return text.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char])
-}
 
 export default {
 	name: 'TbNotesItem',
@@ -236,15 +229,7 @@ export default {
 		t,
 		tbt,
 		toHtml(text, disableCheckboxes) {
-			text = text || ''
-			if (text.length > MAX_RENDER_SIZE) {
-				return '<p>' + escapeHtml(text.slice(0, MAX_RENDER_SIZE)) + '</p>'
-			}
-			let html = renderNote(text)
-			if (disableCheckboxes) {
-				html = html.replace(/<input class="task-list-item-checkbox"/g, '<input disabled="" class="task-list-item-checkbox"')
-			}
-			return html
+			return renderNoteView(text, { disableCheckboxes })
 		},
 		onViewerClick($event) {
 			const target = $event.target
@@ -456,169 +441,4 @@ export default {
 	}
 }
 
-</style>
-
-<style lang="scss">
-// Rendered markdown (based on the upstream notes view)
-.tb-note {
-	* {
-		white-space: normal;
-		word-wrap: break-word;
-		overflow-wrap: break-word;
-	}
-
-	a {
-		color: var(--color-primary-element);
-		text-decoration: underline;
-	}
-
-	p {
-		margin-bottom: 12px;
-	}
-
-	s,
-	del {
-		text-decoration: line-through;
-	}
-
-	em {
-		font-style: italic;
-	}
-
-	strong {
-		font-weight: bold;
-	}
-
-	ol,
-	ul {
-		margin-left: 22px;
-		margin-bottom: 10px;
-	}
-
-	ul {
-		list-style-type: disc;
-
-		&.contains-task-list {
-			list-style-type: none;
-			margin-left: 4px;
-		}
-	}
-
-	ol {
-		list-style-type: decimal;
-	}
-
-	// Checkbox in the text line, wrapped lines start below the text (hanging indent).
-	// The sizes override the global Nextcloud input styles.
-	li.task-list-item {
-		display: list-item;
-		list-style: none;
-		padding-left: 22px;
-		text-indent: -22px;
-		margin: 2px 0;
-
-		> p {
-			margin-bottom: 4px;
-		}
-
-		input.task-list-item-checkbox {
-			display: inline-block;
-			width: 16px;
-			height: 16px;
-			min-height: 0;
-			min-width: 0;
-			margin: 0 6px 0 0;
-			padding: 0;
-			vertical-align: -3px;
-			text-indent: 0;
-			cursor: pointer;
-			accent-color: var(--color-primary-element);
-
-			&:disabled {
-				cursor: default;
-			}
-		}
-
-		ul,
-		ol {
-			text-indent: 0;
-		}
-	}
-
-	h1 {
-		font-size: 18px;
-		font-weight: 600;
-		margin: 12px 0 6px;
-	}
-
-	h2 {
-		font-size: 16px;
-		font-weight: 600;
-		margin: 10px 0 6px;
-	}
-
-	h3,
-	h4,
-	h5,
-	h6 {
-		font-size: 14px;
-		font-weight: 600;
-		margin: 8px 0 4px;
-	}
-
-	code {
-		font-family: var(--font-face-monospace, monospace);
-		background-color: var(--color-background-dark);
-		border-radius: 3px;
-		padding: 0 3px;
-	}
-
-	pre {
-		background-color: var(--color-background-dark);
-		border-radius: var(--border-radius);
-		padding: 6px 8px;
-		overflow: auto;
-		margin-bottom: 10px;
-
-		code {
-			white-space: pre;
-			padding: 0;
-		}
-	}
-
-	img {
-		max-width: 100%;
-		max-height: 50vh;
-		margin: auto;
-		display: block;
-	}
-
-	table {
-		margin-bottom: 10px;
-		border-collapse: collapse;
-
-		thead {
-			background-color: var(--color-background-dark);
-		}
-
-		td,
-		th {
-			border: 1px solid var(--color-border-dark);
-			padding: 3px 6px;
-		}
-	}
-
-	blockquote {
-		padding: 4px 12px;
-		margin: 0 0 12px;
-		color: var(--color-text-maxcontrast);
-		border-left: 4px solid var(--color-border-dark);
-	}
-
-	hr {
-		border: 0;
-		border-top: 1px solid var(--color-border-dark);
-		margin: 12px 0;
-	}
-}
 </style>

@@ -1,4 +1,4 @@
-import { applyFormat, continueList, countTaskItems, findTaskItems, getRenderer, noteExcerpt, renderNote, toggleTaskItem } from '../../../../src/tb/markdown.js'
+import { applyFormat, continueList, countTaskItems, findTaskItems, getRenderer, MAX_RENDER_SIZE, noteExcerpt, renderNote, renderNoteView, toggleTaskItem } from '../../../../src/tb/markdown.js'
 
 import { describe, expect, it } from 'vitest'
 
@@ -100,5 +100,30 @@ describe('markdown - continue lists', () => {
 		expect(continueList('> - eins\n> - ', 13)).toEqual({ text: '> - eins\n>\n> ', start: 13, end: 13 })
 		expect(continueList('normaler Text', 13)).toBe(null)
 		expect(continueList('- eins mittendrin', 3)).toBe(null)
+	})
+})
+
+describe('markdown - note view (sidebar and calendar dialog)', () => {
+	it('turns a bare URL into a link that opens in a new tab', () => {
+		const html = renderNoteView('QUE-272: https://box.example.ts.net:8448/QUE/issues/QUE-272')
+		expect(html).toContain('<a href="https://box.example.ts.net:8448/QUE/issues/QUE-272"')
+		expect(html).toContain('target="_blank"')
+		expect(html).toContain('rel="nofollow noopener noreferrer"')
+	})
+
+	it('disables checklist boxes only when asked', () => {
+		expect(renderNoteView('- [ ] a', { disableCheckboxes: true })).toContain('<input disabled="" class="task-list-item-checkbox"')
+		expect(renderNoteView('- [ ] a')).not.toContain('disabled=""')
+	})
+
+	it('strips script and shows a very long note as escaped text', () => {
+		const unsafe = renderNoteView('<img src=x onerror=alert(1)><script>alert(1)</script>')
+		expect(unsafe).not.toMatch(/<img|<script/)
+		expect(unsafe).toContain('&lt;script&gt;')
+		const long = '<b>' + 'x'.repeat(MAX_RENDER_SIZE)
+		const html = renderNoteView(long)
+		expect(html.startsWith('<p>&lt;b&gt;')).toBe(true)
+		expect(html).not.toContain('<a ')
+		expect(renderNoteView('')).toBe('')
 	})
 })

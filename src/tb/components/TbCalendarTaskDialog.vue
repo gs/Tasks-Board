@@ -63,7 +63,18 @@ without leaving the calendar.
 				</NcButton>
 			</div>
 			<label class="tb-calendar-task__label" for="tb-calendar-task-note">{{ tbt('Notes') }}</label>
-			<textarea id="tb-calendar-task-note"
+			<!-- A note with text is shown rendered, links can be opened; a click elsewhere edits it -->
+			<!-- eslint-disable vue/no-v-html -- sanitized by DOMPurify in renderNoteView() -->
+			<div v-if="showNoteView"
+				class="tb-calendar-task__note-view tb-note"
+				:class="{ 'tb-calendar-task__note-view--editable': !readOnly && !busy }"
+				:title="readOnly ? '' : tbt('Click to edit')"
+				@click="onNoteViewClick"
+				v-html="noteHtml" />
+			<!-- eslint-enable vue/no-v-html -->
+			<textarea v-else
+				id="tb-calendar-task-note"
+				ref="note"
 				v-model="note"
 				class="tb-calendar-task__note"
 				rows="5"
@@ -78,6 +89,8 @@ import client from '../../services/cdav.js'
 import { boardColumn } from '../board.js'
 import { keepTimeOfDay, sameDay, taskUrlFromCalendar } from '../calendar.js'
 import { tbt } from '../l10n.js'
+import { renderNoteView } from '../markdown.js'
+import '../note.scss'
 import { isTaskReadOnly } from '../store/board.js'
 
 import { showError } from '@nextcloud/dialogs'
@@ -131,6 +144,7 @@ export default {
 			calendar: null,
 			summary: '',
 			note: '',
+			noteEditing: false,
 			status: 'open',
 			due: this.day,
 		}
@@ -138,6 +152,13 @@ export default {
 	computed: {
 		writableCalendars() {
 			return this.$store.getters.getSortedWritableCalendars
+		},
+		/** The note is shown rendered until it is edited (an empty note is edited right away) */
+		showNoteView() {
+			return !this.noteEditing && !!this.note.trim()
+		},
+		noteHtml() {
+			return renderNoteView(this.note, { disableCheckboxes: true })
 		},
 		readOnly() {
 			return !!this.task && isTaskReadOnly(this.task)
@@ -206,6 +227,19 @@ export default {
 	},
 	methods: {
 		tbt,
+		/**
+		 * A click on a link opens it (new tab), a click elsewhere edits the note
+		 *
+		 * @param {MouseEvent} $event The click
+		 */
+		async onNoteViewClick($event) {
+			if ($event.target.closest?.('a') || this.readOnly || this.busy) {
+				return
+			}
+			this.noteEditing = true
+			await this.$nextTick()
+			this.$refs.note?.focus?.()
+		},
 		async loadTask() {
 			const calendar = this.$store.getters.getCalendarById(this.calendarId)
 			const task = calendar && await this.$store.dispatch('getTaskByUri', { calendar, taskUri: this.taskUri })
@@ -397,6 +431,23 @@ export default {
 	&__note {
 		width: 100%;
 		resize: vertical;
+	}
+
+	&__note-view {
+		min-height: 2.5em;
+		max-height: 40vh;
+		overflow: auto;
+		padding: 6px 10px;
+		border: 2px solid var(--color-border-maxcontrast);
+		border-radius: var(--border-radius-large);
+
+		&--editable {
+			cursor: text;
+		}
+
+		p:last-child {
+			margin-bottom: 0;
+		}
 	}
 }
 </style>

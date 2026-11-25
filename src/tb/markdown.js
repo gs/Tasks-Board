@@ -48,6 +48,35 @@ export function renderNote(text) {
 	return DOMPurify.sanitize(getRenderer().render(text || ''))
 }
 
+/**
+ * @param {string} text Plain text
+ * @return {string} HTML-escaped text
+ */
+function escapeHtml(text) {
+	return text.replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char])
+}
+
+/**
+ * A note as it is shown when it is not edited: sanitized HTML with clickable links.
+ * Very long notes are shown as escaped plain text.
+ *
+ * @param {string} text The markdown
+ * @param {object} options Options
+ * @param {boolean} options.disableCheckboxes Checklist items cannot be ticked
+ * @return {string} HTML
+ */
+export function renderNoteView(text, { disableCheckboxes = false } = {}) {
+	text = text || ''
+	if (text.length > MAX_RENDER_SIZE) {
+		return '<p>' + escapeHtml(text.slice(0, MAX_RENDER_SIZE)) + '</p>'
+	}
+	let html = renderNote(text)
+	if (disableCheckboxes) {
+		html = html.replace(/<input class="task-list-item-checkbox"/g, '<input disabled="" class="task-list-item-checkbox"')
+	}
+	return html
+}
+
 /** A checklist item at the start of a line: list marker, then [ ] or [x] and text */
 const TASK_ITEM = /^((?:\s*>)*\s*(?:[-*+]|\d+[.)])\s+)\[([ xX])\](?=[ \t]+\S)/
 
