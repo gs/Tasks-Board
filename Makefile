@@ -170,6 +170,11 @@ else
 	@echo "Skipping hashing, no key found in $(private_key)."
 endif
 
+# Deploys this checkout into the Nextcloud on this machine (fork only, see scripts/deploy-local.sh)
+.PHONY: deploy-local
+deploy-local:
+	scripts/deploy-local.sh
+
 # Command for running VUE tests
 .PHONY: test
 test:
